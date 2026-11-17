@@ -1,0 +1,8 @@
+{
+  "name": "GYMBROS",
+  "description": "Juego casual de gimnasio y transformación física con minijuegos arcade, dieta, tabla de progreso visual, logros y desafíos semanales multijugador.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
