@@ -3,11 +3,14 @@ import * as THREE from 'three';
 import { DifficultyLevel, MinigameResult } from '../../types/game';
 import { DIFFICULTY_CONFIG } from '../../data/gameData';
 import { sound } from '../../utils/sound';
+import { DuelProgressBanner } from '../DuelProgressBanner';
 import {
   afterDraw,
+  computeResponsiveCameraZ,
   createStudioRenderer,
   createThreePointLights,
   detectSoftwareGl,
+  disposeObject3D,
   disposeScene,
   loadGlbAsset,
   MODEL_URLS,
@@ -52,6 +55,7 @@ export const MacroCatcherGame: React.FC<MacroCatcherGameProps> = ({
   const mountRef = useRef<HTMLDivElement | null>(null);
   const bowlLaneRef = useRef<0 | 1 | 2 | 3>(1);
   const timeRef = useRef(DURATION_SEC);
+  const lastSecRef = useRef(DURATION_SEC);
   const scoreRef = useRef(0);
   const comboRef = useRef(0);
   const maxComboRef = useRef(0);
@@ -97,14 +101,16 @@ export const MacroCatcherGame: React.FC<MacroCatcherGameProps> = ({
       return;
     }
 
+    let unmounted = false;
     const scene = new THREE.Scene();
     dressGymScene(scene, { fogNear: 8, fogFar: 18, cone: false, wallDistance: 7 });
     scene.environment = envMap;
 
     const w = Math.max(1, container.clientWidth);
     const h = Math.max(1, container.clientHeight);
-    const camera = new THREE.PerspectiveCamera(42, w / h, 0.1, 35);
-    camera.position.set(0, 2.3, 6.2);
+    const aspect = w / h;
+    const camera = new THREE.PerspectiveCamera(42, aspect, 0.1, 35);
+    camera.position.set(0, 2.3, computeResponsiveCameraZ(6.2, aspect, 1.1));
     camera.lookAt(0, 1.45, 0);
 
     createThreePointLights(scene, 6);
@@ -171,7 +177,13 @@ export const MacroCatcherGame: React.FC<MacroCatcherGameProps> = ({
     FOOD_GLB.forEach((f, i) => {
       loadGlbAsset(f.url, f.h)
         .then(({ root }) => {
-          root.children[0].position.y -= f.h / 2; // centre vertically for spinning
+          if (unmounted) {
+            disposeObject3D(root);
+            return;
+          }
+          if (root.children[0]) {
+            root.children[0].position.y -= f.h / 2; // centre vertically for spinning
+          }
           foodTemplates[i] = root;
         })
         .catch(() => {});
@@ -282,7 +294,9 @@ export const MacroCatcherGame: React.FC<MacroCatcherGameProps> = ({
       if (!container) return;
       const cw = Math.max(1, container.clientWidth);
       const ch = Math.max(1, container.clientHeight);
-      camera.aspect = cw / ch;
+      const aspectNext = cw / ch;
+      camera.aspect = aspectNext;
+      camera.position.z = computeResponsiveCameraZ(6.2, aspectNext, 1.1);
       camera.updateProjectionMatrix();
       renderer.setSize(cw, ch);
     });
@@ -290,7 +304,6 @@ export const MacroCatcherGame: React.FC<MacroCatcherGameProps> = ({
 
     let last = performance.now();
     let frameId = 0;
-    let unmounted = false;
 
     const tick = (now: number) => {
       if (unmounted) return;
@@ -298,7 +311,11 @@ export const MacroCatcherGame: React.FC<MacroCatcherGameProps> = ({
       last = now;
 
       timeRef.current = Math.max(0, timeRef.current - dt);
-      setTimeLeft(Math.ceil(timeRef.current));
+      const nextSec = Math.ceil(timeRef.current);
+      if (nextSec !== lastSecRef.current) {
+        lastSecRef.current = nextSec;
+        setTimeLeft(nextSec);
+      }
 
       if (timeRef.current <= 0) {
         finishGame();
@@ -315,7 +332,10 @@ export const MacroCatcherGame: React.FC<MacroCatcherGameProps> = ({
         const kind = isHealthy ? Math.floor(Math.random() * 3) : 3 + Math.floor(Math.random() * 2);
         const built = buildFoodMeshProcedural(kind);
         const tpl = foodTemplates[kind];
-        if (tpl) built.mesh = tpl.clone();
+        if (tpl) {
+          disposeObject3D(built.mesh);
+          built.mesh = tpl.clone();
+        }
         const lane = Math.floor(Math.random() * 4) as 0 | 1 | 2 | 3;
         built.mesh.position.set(LANE_X[lane], 3.8, 0);
         scene.add(built.mesh);
@@ -360,6 +380,7 @@ export const MacroCatcherGame: React.FC<MacroCatcherGameProps> = ({
             sound.playMiss();
           }
           scene.remove(item.mesh);
+          disposeObject3D(item.mesh);
           items.splice(i, 1);
           continue;
         }
@@ -367,13 +388,14 @@ export const MacroCatcherGame: React.FC<MacroCatcherGameProps> = ({
         if (item.y < -0.3) {
           if (item.healthy) actionsRef.current += 1;
           scene.remove(item.mesh);
+          disposeObject3D(item.mesh);
           items.splice(i, 1);
         }
       }
 
       renderer.render(scene, camera);
       if (isSoftwareGl) {
-        frameId = afterDraw(renderer, () => tick(performance.now()));
+        frameId = afterDraw(renderer, () => tick(performance.now()), () => unmounted);
       } else {
         frameId = requestAnimationFrame(tick);
       }
@@ -387,6 +409,9 @@ export const MacroCatcherGame: React.FC<MacroCatcherGameProps> = ({
       clearTimeout(frameId);
       resizeObserver.disconnect();
       renderer.domElement.removeEventListener('pointerdown', onPointerDown);
+      foodTemplates.forEach((tpl) => {
+        if (tpl) disposeObject3D(tpl);
+      });
       disposeScene(scene, renderer);
     };
   }, [cfg.rewardMult, cfg.speedMult, finishGame, moveLane]);
@@ -438,12 +463,11 @@ export const MacroCatcherGame: React.FC<MacroCatcherGameProps> = ({
       </div>
 
       {rivalTargetScore !== undefined && (
-        <div className="mt-4 flex items-center justify-between bg-orange-500/10 border border-orange-500/30 rounded-lg px-4 py-2 text-xs font-medium text-orange-200">
-          <span>Duelo contra {rivalName}</span>
-          <span className="font-mono-tabular font-bold">
-            Meta: {rivalTargetScore.toLocaleString('es-ES')} pts · Actual: {score.toLocaleString('es-ES')}
-          </span>
-        </div>
+        <DuelProgressBanner
+          rivalName={rivalName}
+          rivalTargetScore={rivalTargetScore}
+          score={score}
+        />
       )}
 
       <p className="mt-3 text-xs font-medium text-white/60">{statusMsg}</p>

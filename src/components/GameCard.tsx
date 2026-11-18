@@ -32,11 +32,21 @@ interface GameCardProps {
   meta: string;
   energyCost: number;
   kcal?: number;
+  bestScore?: number;
   variant?: 'compact' | 'full';
   onPlay: () => void;
 }
 
-export const GameCard: React.FC<GameCardProps> = ({ index, game, meta, energyCost, kcal, variant = 'compact', onPlay }) => {
+export const GameCard: React.FC<GameCardProps> = ({
+  index,
+  game,
+  meta,
+  energyCost,
+  kcal,
+  bestScore,
+  variant = 'compact',
+  onPlay,
+}) => {
   const Icon = GAME_ICONS[game.id] ?? Dumbbell;
   const tint = CATEGORY_TINT[game.category] ?? 'from-orange-500/25';
   const full = variant === 'full';
@@ -53,6 +63,11 @@ export const GameCard: React.FC<GameCardProps> = ({ index, game, meta, energyCos
           {String(index + 1).padStart(2, '0')}
         </div>
         <div className="absolute right-4 top-4 flex items-center gap-1.5">
+          {bestScore !== undefined && bestScore > 0 && (
+            <span className="px-2 py-0.5 rounded-full bg-amber-500/20 border border-amber-400/40 text-[10px] font-mono-tabular font-bold text-amber-300 backdrop-blur">
+              PB {bestScore.toLocaleString('es-ES')}
+            </span>
+          )}
           <span className="px-2 py-0.5 rounded-full bg-black/50 border border-white/10 text-[10px] font-bold uppercase tracking-[0.14em] text-white/80 backdrop-blur">
             {game.category}
           </span>

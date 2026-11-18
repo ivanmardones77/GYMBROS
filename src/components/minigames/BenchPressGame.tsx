@@ -3,8 +3,11 @@ import * as THREE from 'three';
 import { DifficultyLevel, MinigameResult } from '../../types/game';
 import { DIFFICULTY_CONFIG } from '../../data/gameData';
 import { sound } from '../../utils/sound';
+import { DuelProgressBanner } from '../DuelProgressBanner';
 import {
   afterDraw,
+  computeResponsiveCameraZ,
+  createKineticParticleTexture,
   createProceduralGymFloorTexture,
   createStudioRenderer,
   createThreePointLights,
@@ -41,11 +44,11 @@ export const BenchPressGame: React.FC<BenchPressGameProps> = ({
   const [combo, setCombo] = useState(0);
   const [maxCombo, setMaxCombo] = useState(0);
   const [perfectHits, setPerfectHits] = useState(0);
-  const [cursorPos, setCursorPos] = useState(50);
   const [feedback, setFeedback] = useState<{ text: string; tone: 'perfect' | 'good' | 'miss' } | null>(null);
   const [locked, setLocked] = useState(false);
 
   const mountRef = useRef<HTMLDivElement | null>(null);
+  const cursorElRef = useRef<HTMLDivElement | null>(null);
   const posRef = useRef(50);
   const dirRef = useRef(1);
   const lastTimeRef = useRef<number | null>(null);
@@ -53,7 +56,25 @@ export const BenchPressGame: React.FC<BenchPressGameProps> = ({
   const barLiftCurrentRef = useRef(0);
   const barTiltRef = useRef(0);
   const camShakeRef = useRef(0);
+  const baseCamZRef = useRef(4.4);
   const platesCountRef = useRef(1);
+  const repTimeoutRef = useRef<number | null>(null);
+  const unmountedGameRef = useRef(false);
+  const burstTriggerRef = useRef<{ seq: number; tone: 'perfect' | 'good' | 'miss' }>({
+    seq: 0,
+    tone: 'perfect',
+  });
+
+  useEffect(() => {
+    unmountedGameRef.current = false;
+    return () => {
+      unmountedGameRef.current = true;
+      if (repTimeoutRef.current !== null) {
+        window.clearTimeout(repTimeoutRef.current);
+        repTimeoutRef.current = null;
+      }
+    };
+  }, []);
 
   const stateRef = useRef({
     rep: 1,
@@ -90,15 +111,22 @@ export const BenchPressGame: React.FC<BenchPressGameProps> = ({
       return;
     }
 
+    let unmounted = false;
     const scene = new THREE.Scene();
     dressGymScene(scene, { fogNear: 6, fogFar: 16 });
-    addGymDecor(scene, ['dumbbells', 'squatRack'], { focus: { x: 0, z: 0 }, depth: 2.8 });
+    addGymDecor(scene, ['dumbbells', 'squatRack'], {
+      focus: { x: 0, z: 0 },
+      depth: 2.8,
+      isCancelled: () => unmounted,
+    });
     scene.environment = envMap;
 
     const w = Math.max(1, container.clientWidth);
     const h = Math.max(1, container.clientHeight);
-    const camera = new THREE.PerspectiveCamera(40, w / h, 0.1, 40);
-    camera.position.set(0, 2.05, 4.4);
+    const aspect = w / h;
+    baseCamZRef.current = computeResponsiveCameraZ(4.4, aspect, 1.05);
+    const camera = new THREE.PerspectiveCamera(40, aspect, 0.1, 40);
+    camera.position.set(0, 2.05, baseCamZRef.current);
     camera.lookAt(0, 1.05, 0);
 
     createThreePointLights(scene, 5);
@@ -140,6 +168,19 @@ export const BenchPressGame: React.FC<BenchPressGameProps> = ({
     const topBar = new THREE.Mesh(new THREE.BoxGeometry(2.35, 0.1, 0.12), steelMat);
     topBar.position.set(0, 2.35, -0.45);
     rackGroup.add(topBar);
+
+    // Reactive LED strips on front rack uprights
+    const rackLedMat = new THREE.MeshStandardMaterial({
+      color: 0xff5a1f,
+      emissive: 0xff5a1f,
+      emissiveIntensity: 0.35,
+      roughness: 0.25,
+    });
+    for (const sideX of [-1.04, 1.04]) {
+      const strip = new THREE.Mesh(new THREE.BoxGeometry(0.025, 1.9, 0.025), rackLedMat);
+      strip.position.set(sideX, 1.2, 0.51);
+      rackGroup.add(strip);
+    }
 
     // Bench
     const benchPad = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.12, 1.5), benchPadMat);
@@ -210,18 +251,42 @@ export const BenchPressGame: React.FC<BenchPressGameProps> = ({
     }
     scene.add(barbellGroup);
 
+    // 3D Impact Spark Particles around Barbell
+    const sparkCount = 40;
+    const sparkPos = new Float32Array(sparkCount * 3);
+    const sparkVel = new Float32Array(sparkCount * 3);
+    const sparkGeo = new THREE.BufferGeometry();
+    const sparkPosAttr = new THREE.BufferAttribute(sparkPos, 3);
+    sparkGeo.setAttribute('position', sparkPosAttr);
+    const sparkMat = new THREE.PointsMaterial({
+      size: 0.13,
+      map: createKineticParticleTexture(),
+      color: 0x34d399,
+      transparent: true,
+      opacity: 0,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    });
+    const sparkPoints = new THREE.Points(sparkGeo, sparkMat);
+    sparkPoints.frustumCulled = false;
+    scene.add(sparkPoints);
+    let lastBurstSeq = 0;
+    let sparkLife = 0;
+    let ledGlow = 0.35;
+
     const resizeObserver = new ResizeObserver(() => {
       if (!container) return;
       const cw = Math.max(1, container.clientWidth);
       const ch = Math.max(1, container.clientHeight);
-      camera.aspect = cw / ch;
+      const aspectNext = cw / ch;
+      camera.aspect = aspectNext;
+      baseCamZRef.current = computeResponsiveCameraZ(4.4, aspectNext, 1.05);
       camera.updateProjectionMatrix();
       renderer.setSize(cw, ch);
     });
     resizeObserver.observe(container);
 
     let frameId = 0;
-    let unmounted = false;
 
     const tick = (now: number) => {
       if (unmounted) return;
@@ -229,7 +294,7 @@ export const BenchPressGame: React.FC<BenchPressGameProps> = ({
       const dt = Math.min(0.05, (now - lastTimeRef.current) / 1000);
       lastTimeRef.current = now;
 
-      // Update precision meter needle
+      // Update precision meter needle via direct DOM style (0 React re-renders per frame)
       if (!stateRef.current.locked) {
         const repSpeedBoost = 1 + (stateRef.current.rep - 1) * 0.065;
         const speed = 95 * cfg.speedMult * repSpeedBoost;
@@ -242,7 +307,9 @@ export const BenchPressGame: React.FC<BenchPressGameProps> = ({
           dirRef.current = 1;
         }
         posRef.current = next;
-        setCursorPos(next);
+        if (cursorElRef.current) {
+          cursorElRef.current.style.left = `${next}%`;
+        }
       }
 
       // Smooth 3D barbell lift kinematics
@@ -273,15 +340,61 @@ export const BenchPressGame: React.FC<BenchPressGameProps> = ({
         r.visible = vis;
       });
 
+      // Trigger 3D burst & rack LED feedback on lift
+      if (burstTriggerRef.current.seq !== lastBurstSeq) {
+        lastBurstSeq = burstTriggerRef.current.seq;
+        const tone = burstTriggerRef.current.tone;
+        const hex = tone === 'perfect' ? 0x10b981 : tone === 'good' ? 0xfbbf24 : 0xf43f5e;
+        rackLedMat.color.setHex(hex);
+        rackLedMat.emissive.setHex(hex);
+        ledGlow = tone === 'perfect' ? 1.8 : 1.05;
+        if (tone !== 'miss') {
+          sparkMat.color.setHex(hex);
+          sparkLife = 1.0;
+          for (let i = 0; i < sparkCount; i++) {
+            const side = i % 2 === 0 ? -1.25 : 1.25;
+            const idx = i * 3;
+            sparkPos[idx] = side + (Math.random() - 0.5) * 0.25;
+            sparkPos[idx + 1] = barbellGroup.position.y + (Math.random() - 0.5) * 0.2;
+            sparkPos[idx + 2] = 0.05 + (Math.random() - 0.5) * 0.2;
+            const ang = Math.random() * Math.PI * 2;
+            const spd = 1.2 + Math.random() * 2.2;
+            sparkVel[idx] = Math.cos(ang) * spd;
+            sparkVel[idx + 1] = 1.2 + Math.random() * 2.4;
+            sparkVel[idx + 2] = Math.sin(ang) * spd;
+          }
+          sparkPosAttr.needsUpdate = true;
+        }
+      }
+
+      ledGlow = THREE.MathUtils.damp(ledGlow, 0.3, 4.5, dt);
+      rackLedMat.emissiveIntensity = ledGlow;
+
+      if (sparkLife > 0.01) {
+        sparkPoints.visible = true;
+        sparkLife = Math.max(0, sparkLife - dt * 1.9);
+        sparkMat.opacity = sparkLife;
+        for (let i = 0; i < sparkCount; i++) {
+          const idx = i * 3;
+          sparkVel[idx + 1] -= 5.8 * dt;
+          sparkPos[idx] += sparkVel[idx] * dt;
+          sparkPos[idx + 1] += sparkVel[idx + 1] * dt;
+          sparkPos[idx + 2] += sparkVel[idx + 2] * dt;
+        }
+        sparkPosAttr.needsUpdate = true;
+      } else {
+        sparkPoints.visible = false;
+      }
+
       // Subtle camera punch on lift
       camShakeRef.current = THREE.MathUtils.damp(camShakeRef.current, 0, 14, dt);
       camera.position.y = 2.05 + Math.sin(now * 0.04) * camShakeRef.current;
-      camera.position.z = 4.4 - barLiftCurrentRef.current * 0.18;
+      camera.position.z = baseCamZRef.current - barLiftCurrentRef.current * 0.18;
 
       renderer.render(scene, camera);
 
       if (isSoftwareGl) {
-        frameId = afterDraw(renderer, () => tick(performance.now()));
+        frameId = afterDraw(renderer, () => tick(performance.now()), () => unmounted);
       } else {
         frameId = requestAnimationFrame(tick);
       }
@@ -299,7 +412,7 @@ export const BenchPressGame: React.FC<BenchPressGameProps> = ({
   }, [cfg.speedMult]);
 
   const handleLift = useCallback(() => {
-    if (stateRef.current.locked) return;
+    if (stateRef.current.locked || unmountedGameRef.current) return;
     setLocked(true);
 
     const pos = posRef.current;
@@ -320,13 +433,15 @@ export const BenchPressGame: React.FC<BenchPressGameProps> = ({
       sound.playPerfect();
       barLiftTargetRef.current = 1.0;
       camShakeRef.current = 0.06;
+      burstTriggerRef.current = { seq: burstTriggerRef.current.seq + 1, tone: 'perfect' };
     } else if (dist <= goodHalf) {
       nextCombo += 1;
       const mult = 1 + Math.min(1.5, nextCombo * 0.15);
       points = Math.round(90 * mult * cfg.rewardMult);
       fb = { text: '¡BUENA REPETICIÓN!', tone: 'good' };
-      sound.playHit();
+      sound.playComboHit(nextCombo);
       barLiftTargetRef.current = 0.72;
+      burstTriggerRef.current = { seq: burstTriggerRef.current.seq + 1, tone: 'good' };
     } else {
       nextCombo = 0;
       points = Math.round(15 * cfg.rewardMult);
@@ -334,6 +449,7 @@ export const BenchPressGame: React.FC<BenchPressGameProps> = ({
       sound.playMiss();
       barLiftTargetRef.current = 0.18;
       barTiltRef.current = pos < 50 ? 0.12 : -0.12;
+      burstTriggerRef.current = { seq: burstTriggerRef.current.seq + 1, tone: 'miss' };
     }
 
     const nextScore = stateRef.current.score + points;
@@ -345,7 +461,9 @@ export const BenchPressGame: React.FC<BenchPressGameProps> = ({
     setPerfectHits(nextPerfect);
     setFeedback(fb);
 
-    setTimeout(() => {
+    if (repTimeoutRef.current !== null) window.clearTimeout(repTimeoutRef.current);
+    repTimeoutRef.current = window.setTimeout(() => {
+      if (unmountedGameRef.current) return;
       barLiftTargetRef.current = 0;
       if (currentRep >= TOTAL_REPS) {
         onComplete({
@@ -415,12 +533,11 @@ export const BenchPressGame: React.FC<BenchPressGameProps> = ({
       </div>
 
       {rivalTargetScore !== undefined && (
-        <div className="mt-4 flex items-center justify-between bg-orange-500/10 border border-orange-500/30 rounded-lg px-4 py-2 text-xs font-medium text-orange-200">
-          <span>Duelo contra {rivalName}</span>
-          <span className="font-mono-tabular font-bold">
-            Meta: {rivalTargetScore.toLocaleString('es-ES')} pts · Actual: {score.toLocaleString('es-ES')}
-          </span>
-        </div>
+        <DuelProgressBanner
+          rivalName={rivalName}
+          rivalTargetScore={rivalTargetScore}
+          score={score}
+        />
       )}
 
       {/* 3D Barbell Viewport */}
@@ -431,7 +548,7 @@ export const BenchPressGame: React.FC<BenchPressGameProps> = ({
         <div ref={mountRef} className="w-full h-full" />
 
         <div className="pointer-events-none absolute top-3 left-4 right-4 flex items-center justify-between text-xs text-white/80">
-          <span className="bg-black/70 backdrop-blur-sm border border-white/10 px-2.5 py-1 rounded">
+          <span className="bg-black/80 border border-white/15 px-2.5 py-1 rounded">
             Carga en barra: <strong className="text-white font-mono-tabular">{currentWeightKg} kg</strong>
           </span>
           {combo >= 3 && (
@@ -442,7 +559,7 @@ export const BenchPressGame: React.FC<BenchPressGameProps> = ({
         </div>
 
         {feedback && (
-          <div className="pointer-events-none absolute bottom-3 left-1/2 -translate-x-1/2 bg-black/75 backdrop-blur-sm px-4 py-1.5 rounded-lg">
+          <div className="pointer-events-none absolute bottom-3 left-1/2 -translate-x-1/2 bg-black/85 border border-white/10 px-4 py-1.5 rounded-lg">
             <span
               className={`text-sm font-extrabold tracking-wide ${
                 feedback.tone === 'perfect'
@@ -471,8 +588,9 @@ export const BenchPressGame: React.FC<BenchPressGameProps> = ({
           />
           <div className="absolute top-0 bottom-0 left-1/2 w-0.5 bg-[#141414]/90 -translate-x-1/2" />
           <div
+            ref={cursorElRef}
             className="absolute top-0 bottom-0 w-2 bg-white rounded-sm shadow-none -translate-x-1/2"
-            style={{ left: `${cursorPos}%` }}
+            style={{ left: '50%' }}
           />
         </div>
 

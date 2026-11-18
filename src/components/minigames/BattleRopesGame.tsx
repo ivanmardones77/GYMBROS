@@ -3,8 +3,10 @@ import * as THREE from 'three';
 import { DifficultyLevel, MinigameResult } from '../../types/game';
 import { DIFFICULTY_CONFIG } from '../../data/gameData';
 import { sound } from '../../utils/sound';
+import { DuelProgressBanner } from '../DuelProgressBanner';
 import {
   afterDraw,
+  computeResponsiveCameraZ,
   createProceduralGymFloorTexture,
   createStudioRenderer,
   createThreePointLights,
@@ -46,6 +48,7 @@ export const BattleRopesGame: React.FC<BattleRopesGameProps> = ({
 
   const mountRef = useRef<HTMLDivElement | null>(null);
   const timeRef = useRef(DURATION_SEC);
+  const lastSecRef = useRef(DURATION_SEC);
   const scoreRef = useRef(0);
   const comboRef = useRef(0);
   const maxComboRef = useRef(0);
@@ -149,7 +152,11 @@ export const BattleRopesGame: React.FC<BattleRopesGameProps> = ({
               ? `¡TORMENTA DE OLAS x${comboRef.current}! +${pts}`
               : `¡Onda limpia! +${pts}`
           );
-          sound.playPunch();
+          if (comboRef.current >= 3) {
+            sound.playComboHit(comboRef.current);
+          } else {
+            sound.playPunch();
+          }
         }
 
         setScore(scoreRef.current);
@@ -181,15 +188,20 @@ export const BattleRopesGame: React.FC<BattleRopesGameProps> = ({
       return;
     }
 
+    let unmounted = false;
     const scene = new THREE.Scene();
     dressGymScene(scene, { fogNear: 6, fogFar: 15, focus: { x: 0, z: -0.45 } });
-    addGymDecor(scene, ['squatRack', 'dumbbells'], { focus: { x: 0, z: -0.45 }, depth: 2.8 });
+    addGymDecor(scene, ['squatRack', 'dumbbells'], {
+      focus: { x: 0, z: -0.45 },
+      depth: 2.8,
+      isCancelled: () => unmounted,
+    });
     scene.environment = envMap;
 
     const w = Math.max(1, container.clientWidth);
     const h = Math.max(1, container.clientHeight);
     const camera = new THREE.PerspectiveCamera(44, w / h, 0.1, 35);
-    camera.position.set(1.25, 1.95, 3.85);
+    camera.position.set(1.25, 1.95, computeResponsiveCameraZ(3.85, w / h, 1.0));
     camera.lookAt(0, 0.75, -0.45);
 
     createThreePointLights(scene, 6);
@@ -268,7 +280,9 @@ export const BattleRopesGame: React.FC<BattleRopesGameProps> = ({
       if (!container) return;
       const cw = Math.max(1, container.clientWidth);
       const ch = Math.max(1, container.clientHeight);
-      camera.aspect = cw / ch;
+      const aspect = cw / ch;
+      camera.aspect = aspect;
+      camera.position.z = computeResponsiveCameraZ(3.85, aspect, 1.0);
       camera.updateProjectionMatrix();
       renderer.setSize(cw, ch);
     });
@@ -276,7 +290,6 @@ export const BattleRopesGame: React.FC<BattleRopesGameProps> = ({
 
     let last = performance.now();
     let frameId = 0;
-    let unmounted = false;
 
     const tick = (now: number) => {
       if (unmounted) return;
@@ -284,7 +297,11 @@ export const BattleRopesGame: React.FC<BattleRopesGameProps> = ({
       last = now;
 
       timeRef.current = Math.max(0, timeRef.current - dt);
-      setTimeLeft(Math.ceil(timeRef.current));
+      const nextSec = Math.ceil(timeRef.current);
+      if (nextSec !== lastSecRef.current) {
+        lastSecRef.current = nextSec;
+        setTimeLeft(nextSec);
+      }
 
       if (timeRef.current <= 0) {
         finishGame();
@@ -332,7 +349,7 @@ export const BattleRopesGame: React.FC<BattleRopesGameProps> = ({
 
       renderer.render(scene, camera);
       if (isSoftwareGl) {
-        frameId = afterDraw(renderer, () => tick(performance.now()));
+        frameId = afterDraw(renderer, () => tick(performance.now()), () => unmounted);
       } else {
         frameId = requestAnimationFrame(tick);
       }
@@ -402,18 +419,17 @@ export const BattleRopesGame: React.FC<BattleRopesGameProps> = ({
       </div>
 
       {rivalTargetScore !== undefined && (
-        <div className="mt-4 flex items-center justify-between bg-orange-500/10 border border-orange-500/30 rounded-lg px-4 py-2 text-xs font-medium text-orange-200">
-          <span>Duelo contra {rivalName}</span>
-          <span className="font-mono-tabular font-bold">
-            Meta: {rivalTargetScore.toLocaleString('es-ES')} pts · Actual: {score.toLocaleString('es-ES')}
-          </span>
-        </div>
+        <DuelProgressBanner
+          rivalName={rivalName}
+          rivalTargetScore={rivalTargetScore}
+          score={score}
+        />
       )}
 
       {/* 3D Battle Ropes Viewport */}
       <div className="mt-5 relative h-[56vh] min-h-[360px] max-h-[580px] fc-stage rounded-2xl overflow-hidden bg-black select-none">
         <div ref={mountRef} className="w-full h-full" />
-        <div className="pointer-events-none absolute bottom-3 left-1/2 -translate-x-1/2 bg-black/70 backdrop-blur-sm px-3.5 py-1 rounded-lg text-xs text-white/80 whitespace-nowrap">
+        <div className="pointer-events-none absolute bottom-3 left-1/2 -translate-x-1/2 bg-black/80 border border-white/15 px-3.5 py-1 rounded-lg text-xs text-white/85 whitespace-nowrap">
           {feedback}
         </div>
       </div>

@@ -472,11 +472,63 @@ export const DAILY_REWARDS: DailyRewardStep[] = [
   { day: 7, title: 'Día 7', rewardText: 'Conjunto Titan Oro + 650', coins: 650, outfitUnlock: 'titan', energyBonus: 100 },
 ];
 
-export const OUTFITS: Record<OutfitId, { name: string; color: string; cost: number }> = {
-  basic: { name: 'Camiseta Básica', color: '#2B2B30', cost: 0 },
-  runner: { name: 'Runner Azul', color: '#0284C7', cost: 220 },
-  pro: { name: 'Élite Esmeralda', color: '#059669', cost: 420 },
-  titan: { name: 'Titan Dorado', color: '#FF5A1F', cost: 750 },
+export interface OutfitSpec {
+  name: string;
+  color: string;
+  cost: number;
+  perkLabel: string;
+  energyBonus: number;
+  muscleMult: number;
+  fatMult: number;
+  xpMult: number;
+  coinMult: number;
+}
+
+export const OUTFITS: Record<OutfitId, OutfitSpec> = {
+  basic: {
+    name: 'Camiseta Básica',
+    color: '#2B2B30',
+    cost: 0,
+    perkLabel: 'Estándar · Sin bonos',
+    energyBonus: 0,
+    muscleMult: 1.0,
+    fatMult: 1.0,
+    xpMult: 1.0,
+    coinMult: 1.0,
+  },
+  runner: {
+    name: 'Runner Azul',
+    color: '#0284C7',
+    cost: 220,
+    perkLabel: '+10 Energía · +15% Quema · +5% XP',
+    energyBonus: 10,
+    muscleMult: 1.0,
+    fatMult: 1.15,
+    xpMult: 1.05,
+    coinMult: 1.0,
+  },
+  pro: {
+    name: 'Élite Esmeralda',
+    color: '#059669',
+    cost: 420,
+    perkLabel: '+15 Energía · +15% Músculo · +10% XP',
+    energyBonus: 15,
+    muscleMult: 1.15,
+    fatMult: 1.1,
+    xpMult: 1.1,
+    coinMult: 1.08,
+  },
+  titan: {
+    name: 'Titan Dorado',
+    color: '#FF5A1F',
+    cost: 750,
+    perkLabel: '+25 Energía · +25% Físico · +20% Premios',
+    energyBonus: 25,
+    muscleMult: 1.25,
+    fatMult: 1.25,
+    xpMult: 1.2,
+    coinMult: 1.2,
+  },
 };
 
 export const INITIAL_RIVALS: MultiplayerRival[] = [
@@ -515,6 +567,76 @@ export const MOTIVATIONAL_PUSH_POOL = [
     category: 'Recompensa' as const,
   },
 ];
+
+export function getLocalDateKey(date = new Date()): string {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+export function getDayDiff(fromDateKey: string, toDateKey: string): number {
+  const a = new Date(`${fromDateKey}T00:00:00`).getTime();
+  const b = new Date(`${toDateKey}T00:00:00`).getTime();
+  if (Number.isNaN(a) || Number.isNaN(b)) return 0;
+  return Math.round((b - a) / 86400000);
+}
+
+export function getIsoWeekKey(date = new Date()): string {
+  const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+  const dayNum = d.getUTCDay() || 7;
+  d.setUTCDate(d.getUTCDate() + 4 - dayNum);
+  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+  const weekNo = Math.ceil(((d.getTime() - yearStart.getTime()) / 86400000 + 1) / 7);
+  return `${d.getUTCFullYear()}-W${String(weekNo).padStart(2, '0')}`;
+}
+
+export function getTimeUntilSundayReset(now = new Date()): string {
+  const day = now.getDay(); // 0 = Sun
+  const daysUntilSunday = day === 0 ? 0 : 7 - day;
+  const reset = new Date(
+    now.getFullYear(),
+    now.getMonth(),
+    now.getDate() + daysUntilSunday,
+    23,
+    59,
+    59
+  );
+  const diffMs = Math.max(0, reset.getTime() - now.getTime());
+  const totalHours = Math.floor(diffMs / 3600000);
+  const days = Math.floor(totalHours / 24);
+  const hours = totalHours % 24;
+  const mins = Math.floor((diffMs % 3600000) / 60000);
+  return days > 0 ? `${days}d ${hours}h` : `${hours}h ${mins}m`;
+}
+
+export function computeRivalDuelTarget(
+  rival: Pick<MultiplayerRival, 'fitnessScore' | 'weeklyScore'>,
+  difficulty: DifficultyLevel
+): number {
+  const fitnessFactor = Math.round(rival.fitnessScore * 11);
+  const diffFactor = Math.round(difficulty * 235);
+  return Math.max(850, 620 + fitnessFactor + diffFactor);
+}
+
+export function applyXpAndLevelUp(
+  xp: number,
+  level: number,
+  xpToNext: number,
+  gainedXp: number
+): { xp: number; level: number; xpToNext: number; leveledUp: boolean } {
+  let nextXp = xp + gainedXp;
+  let nextLevel = level;
+  let nextXpToNext = xpToNext;
+  let leveledUp = false;
+  while (nextXp >= nextXpToNext) {
+    nextXp -= nextXpToNext;
+    nextLevel += 1;
+    nextXpToNext = Math.round(nextXpToNext * 1.28);
+    leveledUp = true;
+  }
+  return { xp: nextXp, level: nextLevel, xpToNext: nextXpToNext, leveledUp };
+}
 
 export function getPhysiqueStage(fitnessScore: number): PhysiqueStage {
   if (fitnessScore < 28) return 'Fuera de Forma';
@@ -578,5 +700,9 @@ export function createInitialPlayer(
     dailyMissionsClaimed: [],
     workoutsToday: 0,
     healthyMealsToday: 0,
+    personalBests: {},
+    lastActiveDate: getLocalDateKey(),
+    lastEnergyTickAt: Date.now(),
+    currentWeekKey: getIsoWeekKey(),
   };
 }

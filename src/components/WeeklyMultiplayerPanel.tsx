@@ -1,24 +1,37 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { DifficultyLevel, MinigameId, MultiplayerRival, PlayerStats } from '../types/game';
-import { MINIGAMES } from '../data/gameData';
-import { Swords, Users, Copy, Check } from 'lucide-react';
+import {
+  MINIGAMES,
+  computeRivalDuelTarget,
+  getIsoWeekKey,
+  getTimeUntilSundayReset,
+} from '../data/gameData';
+import { Swords, Users, Copy, Check, Gift } from 'lucide-react';
 import { Trophy3DWidget } from './Trophy3DWidget';
 
 interface WeeklyMultiplayerPanelProps {
   player: PlayerStats;
   rivals: MultiplayerRival[];
   onStartDuel: (gameId: MinigameId, difficulty: DifficultyLevel, rival: MultiplayerRival) => void;
+  onClaimWeeklyChest?: (rank: number, coins: number, xp: number) => void;
 }
 
 export const WeeklyMultiplayerPanel: React.FC<WeeklyMultiplayerPanelProps> = ({
   player,
   rivals,
   onStartDuel,
+  onClaimWeeklyChest,
 }) => {
   const [selectedGame, setSelectedGame] = useState<MinigameId>('boxing');
   const [copiedCode, setCopiedCode] = useState(false);
   const [friendCodeInput, setFriendCodeInput] = useState('');
   const [friendFeedback, setFriendFeedback] = useState<string | null>(null);
+  const [countdown, setCountdown] = useState(() => getTimeUntilSundayReset());
+
+  useEffect(() => {
+    const id = window.setInterval(() => setCountdown(getTimeUntilSundayReset()), 30000);
+    return () => window.clearInterval(id);
+  }, []);
 
   // Merge player into sorted leaderboard
   const leaderboard: MultiplayerRival[] = [
@@ -68,6 +81,18 @@ export const WeeklyMultiplayerPanel: React.FC<WeeklyMultiplayerPanelProps> = ({
     });
   };
 
+  const currentWeek = getIsoWeekKey();
+  const podiumReward =
+    playerRank === 1
+      ? { coins: 800, xp: 300 }
+      : playerRank === 2
+      ? { coins: 500, xp: 200 }
+      : playerRank === 3
+      ? { coins: 300, xp: 140 }
+      : null;
+  const alreadyClaimedThisWeek = player.weeklyPrizeClaimedWeek === currentWeek;
+  const canClaimPodium = Boolean(podiumReward && !alreadyClaimedThisWeek && player.weeklyScore >= 1000 && onClaimWeeklyChest);
+
   return (
     <div className="space-y-8">
       {/* Event Hero Banner */}
@@ -75,13 +100,13 @@ export const WeeklyMultiplayerPanel: React.FC<WeeklyMultiplayerPanelProps> = ({
         <div className="lg:col-span-8 bg-black text-white rounded-xl p-6 flex flex-col justify-between">
           <div>
             <p className="text-xs text-orange-400 font-semibold">
-              Liga Global Semanal · Reinicio en 3d 14h
+              Liga Global Semanal · Reinicio en {countdown}
             </p>
             <h2 className="text-3xl font-bold tracking-tight mt-1">
               Copa Titanes de Resistencia
             </h2>
             <p className="text-sm text-white/60 mt-2 max-w-2xl">
-              Suma puntos en cualquier minijuego y lanza Duelos Directos contra atletas reales de tu división. Los 3 primeros ganan el cofre dorado el domingo.
+              Suma puntos en cualquier minijuego y lanza Duelos Directos contra atletas de tu división. Alcanza el Top 3 para reclamar el Cofre Dorado semanal.
             </p>
           </div>
 
@@ -107,15 +132,39 @@ export const WeeklyMultiplayerPanel: React.FC<WeeklyMultiplayerPanelProps> = ({
           </div>
         </div>
 
-        <div className="lg:col-span-4 fc-card p-5 flex items-center gap-4">
-          <Trophy3DWidget className="w-28 h-28 shrink-0" />
-          <div className="flex-1 min-w-0">
-            <div className="text-xs text-white/50">Premio Top 3</div>
-            <h3 className="text-lg font-bold text-white">Trofeo Dorado + 800 Monedas</h3>
-            <p className="text-xs text-white/60 mt-1">
-              Elige disciplina y supera al rival encima de ti para escalar puestos.
-            </p>
+        <div className="lg:col-span-4 fc-card p-5 flex flex-col justify-between gap-3">
+          <div className="flex items-center gap-4">
+            <Trophy3DWidget className="w-24 h-24 shrink-0" />
+            <div className="flex-1 min-w-0">
+              <div className="text-xs text-white/50">Premio Top 3</div>
+              <h3 className="text-lg font-bold text-white">Cofre Dorado · +800 Monedas</h3>
+              <p className="text-xs text-white/60 mt-1">
+                {podiumReward
+                  ? `En puesto #${playerRank}: +${podiumReward.coins} mon y +${podiumReward.xp} XP.`
+                  : 'Supera rivales para entrar al Top 3 semanal.'}
+              </p>
+            </div>
           </div>
+          {onClaimWeeklyChest && (
+            <button
+              onClick={() => podiumReward && onClaimWeeklyChest(playerRank, podiumReward.coins, podiumReward.xp)}
+              disabled={!canClaimPodium}
+              className={`w-full py-2 px-3 rounded-lg text-xs font-bold uppercase tracking-wider flex items-center justify-center gap-1.5 transition-colors cursor-pointer disabled:cursor-not-allowed ${
+                alreadyClaimedThisWeek
+                  ? 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30'
+                  : canClaimPodium
+                  ? 'bg-amber-400 hover:bg-amber-300 text-black'
+                  : 'bg-white/[0.06] text-white/40 border border-white/10'
+              }`}
+            >
+              <Gift className="w-3.5 h-3.5" />
+              {alreadyClaimedThisWeek
+                ? 'Cofre Semanal Reclamado'
+                : canClaimPodium
+                ? `Reclamar Cofre Top #${playerRank}`
+                : 'Entra al Top 3 (1,000+ pts)'}
+            </button>
+          )}
         </div>
       </div>
 
@@ -133,10 +182,10 @@ export const WeeklyMultiplayerPanel: React.FC<WeeklyMultiplayerPanelProps> = ({
               <select
                 value={selectedGame}
                 onChange={(e) => setSelectedGame(e.target.value as MinigameId)}
-                className="bg-white/[0.03] border border-white/10 rounded-lg px-2.5 py-1.5 text-xs font-semibold text-white/90"
+                className="bg-[#141414] border border-white/15 rounded-lg px-2.5 py-1.5 text-xs font-semibold text-white cursor-pointer focus:outline-none focus:border-orange-500"
               >
                 {MINIGAMES.map((g) => (
-                  <option key={g.id} value={g.id}>
+                  <option key={g.id} value={g.id} className="bg-[#141414] text-white">
                     {g.title}
                   </option>
                 ))}
@@ -149,6 +198,7 @@ export const WeeklyMultiplayerPanel: React.FC<WeeklyMultiplayerPanelProps> = ({
               const rank = idx + 1;
               const diff = Math.min(5, Math.max(1, Math.ceil(player.level / 2))) as DifficultyLevel;
               const isPromotionZone = rank <= 3;
+              const duelTarget = computeRivalDuelTarget(row, diff);
 
               return (
                 <div
@@ -175,6 +225,11 @@ export const WeeklyMultiplayerPanel: React.FC<WeeklyMultiplayerPanelProps> = ({
                       </div>
                       <div className="text-xs text-white/50">
                         {row.club} · Forma {row.fitnessScore}/100 · Racha {row.streak}d
+                        {!row.isPlayer && (
+                          <span className="text-orange-400/90 font-semibold">
+                            {' '}· Meta duelo: {duelTarget.toLocaleString('es-ES')} pts
+                          </span>
+                        )}
                       </div>
                     </div>
                   </div>

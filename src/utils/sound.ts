@@ -8,16 +8,22 @@ class SoundEngine {
 
   private getContext(): AudioContext | null {
     if (!this.enabled || typeof window === 'undefined') return null;
-    if (!this.ctx) {
-      const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-      if (AudioCtx) {
-        this.ctx = new AudioCtx();
+    try {
+      if (!this.ctx) {
+        const AudioCtx =
+          window.AudioContext ||
+          (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+        if (AudioCtx) {
+          this.ctx = new AudioCtx();
+        }
       }
+      if (this.ctx && this.ctx.state === 'suspended') {
+        this.ctx.resume().catch(() => {});
+      }
+      return this.ctx;
+    } catch {
+      return null;
     }
-    if (this.ctx && this.ctx.state === 'suspended') {
-      this.ctx.resume().catch(() => {});
-    }
-    return this.ctx;
   }
 
   private tone(
@@ -31,25 +37,29 @@ class SoundEngine {
     const ctx = this.getContext();
     if (!ctx) return;
 
-    const now = ctx.currentTime + delay;
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
+    try {
+      const now = ctx.currentTime + delay;
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
 
-    osc.type = type;
-    osc.frequency.setValueAtTime(freq, now);
-    if (endFreq !== undefined) {
-      osc.frequency.exponentialRampToValueAtTime(Math.max(20, endFreq), now + duration);
+      osc.type = type;
+      osc.frequency.setValueAtTime(freq, now);
+      if (endFreq !== undefined) {
+        osc.frequency.exponentialRampToValueAtTime(Math.max(20, endFreq), now + duration);
+      }
+
+      gain.gain.setValueAtTime(0.001, now);
+      gain.gain.linearRampToValueAtTime(volume, now + 0.01);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + duration);
+
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+
+      osc.start(now);
+      osc.stop(now + duration + 0.02);
+    } catch {
+      // Ignore Web Audio errors when blocked or closed
     }
-
-    gain.gain.setValueAtTime(0.001, now);
-    gain.gain.linearRampToValueAtTime(volume, now + 0.01);
-    gain.gain.exponentialRampToValueAtTime(0.001, now + duration);
-
-    osc.connect(gain);
-    gain.connect(ctx.destination);
-
-    osc.start(now);
-    osc.stop(now + duration + 0.02);
   }
 
   public playTap() {
@@ -58,6 +68,11 @@ class SoundEngine {
 
   public playHit() {
     this.tone(520, 0.09, 'triangle', 0.12, 0, 680);
+  }
+
+  public playComboHit(combo: number) {
+    const pitch = Math.min(1040, 480 + combo * 28);
+    this.tone(pitch, 0.09, 'triangle', 0.12, 0, pitch * 1.25);
   }
 
   public playPerfect() {
@@ -92,6 +107,13 @@ class SoundEngine {
     this.tone(554.37, 0.1, 'triangle', 0.12, 0.09);
     this.tone(659.25, 0.12, 'triangle', 0.13, 0.18);
     this.tone(880, 0.25, 'sine', 0.15, 0.28);
+  }
+
+  public playNewRecord() {
+    this.tone(523.25, 0.08, 'triangle', 0.12, 0);
+    this.tone(659.25, 0.08, 'triangle', 0.12, 0.07);
+    this.tone(783.99, 0.1, 'triangle', 0.13, 0.14);
+    this.tone(1046.5, 0.22, 'sine', 0.15, 0.22);
   }
 
   public playPushChime() {

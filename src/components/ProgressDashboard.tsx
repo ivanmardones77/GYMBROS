@@ -5,15 +5,17 @@ import {
   ProgressPoint,
   WorkoutHistoryEntry,
 } from '../types/game';
-import { ACHIEVEMENTS, getPhysiqueStage } from '../data/gameData';
+import { ACHIEVEMENTS, MINIGAMES, getPhysiqueStage } from '../data/gameData';
 import { Athlete3DViewer } from './Athlete3DViewer';
-import { Award, CheckCircle2, TrendingUp } from 'lucide-react';
+import { Award, CheckCircle2, TrendingUp, Trophy } from 'lucide-react';
 
 interface ProgressDashboardProps {
   player: PlayerStats;
   history: ProgressPoint[];
   workouts: WorkoutHistoryEntry[];
   unlockedAchievementIds: string[];
+  aiAthlete?: boolean;
+  onChangeAiAthlete?: (ai: boolean) => void;
 }
 
 type MetricKey = 'fitnessScore' | 'weightKg' | 'bodyFatPct' | 'muscleKg';
@@ -33,6 +35,8 @@ export const ProgressDashboard: React.FC<ProgressDashboardProps> = ({
   history,
   workouts,
   unlockedAchievementIds,
+  aiAthlete = true,
+  onChangeAiAthlete,
 }) => {
   const [selectedMetric, setSelectedMetric] = useState<MetricKey>('fitnessScore');
   const [achFilter, setAchFilter] = useState<'Todos' | Achievement['category']>('Todos');
@@ -151,7 +155,7 @@ export const ProgressDashboard: React.FC<ProgressDashboardProps> = ({
                         y1={y}
                         x2={svgW - padX}
                         y2={y}
-                        stroke="#E2E8F0"
+                        stroke="rgba(255,255,255,0.08)"
                         strokeWidth="1"
                       />
                       <text
@@ -159,7 +163,7 @@ export const ProgressDashboard: React.FC<ProgressDashboardProps> = ({
                         y={y + 4}
                         textAnchor="end"
                         fontSize="10"
-                        fill="#64748B"
+                        fill="#94A3B8"
                         className="font-mono-tabular"
                       >
                         {val}
@@ -170,7 +174,7 @@ export const ProgressDashboard: React.FC<ProgressDashboardProps> = ({
 
                 {/* Area fill */}
                 {coords.length > 1 && (
-                  <polygon points={areaPoints} fill={meta.color} fillOpacity="0.1" />
+                  <polygon points={areaPoints} fill={meta.color} fillOpacity="0.14" />
                 )}
 
                 {/* Line */}
@@ -186,33 +190,43 @@ export const ProgressDashboard: React.FC<ProgressDashboardProps> = ({
                 )}
 
                 {/* Points */}
-                {coords.map((c, idx) => (
-                  <g
-                    key={c.pt.id}
-                    onMouseEnter={() => setHoveredIdx(idx)}
-                    onMouseLeave={() => setHoveredIdx(null)}
-                    onClick={() => setHoveredIdx(idx)}
-                    className="cursor-pointer"
-                  >
-                    <circle
-                      cx={c.x}
-                      cy={c.y}
-                      r={hoveredIdx === idx ? 7 : 5}
-                      fill="#FFFFFF"
-                      stroke={meta.color}
-                      strokeWidth="3"
-                    />
-                    <text
-                      x={c.x}
-                      y={svgH - 4}
-                      textAnchor="middle"
-                      fontSize="10"
-                      fill="#64748B"
+                {coords.map((c, idx) => {
+                  const showXLabel =
+                    coords.length <= 6 ||
+                    idx === 0 ||
+                    idx === coords.length - 1 ||
+                    idx % 2 === 0;
+                  const shortLabel = c.pt.label.replace(/^Sesión\s+/i, 'S');
+                  return (
+                    <g
+                      key={c.pt.id}
+                      onMouseEnter={() => setHoveredIdx(idx)}
+                      onMouseLeave={() => setHoveredIdx(null)}
+                      onClick={() => setHoveredIdx(idx)}
+                      className="cursor-pointer"
                     >
-                      {c.pt.label}
-                    </text>
-                  </g>
-                ))}
+                      <circle
+                        cx={c.x}
+                        cy={c.y}
+                        r={hoveredIdx === idx ? 7 : 5}
+                        fill="#FFFFFF"
+                        stroke={meta.color}
+                        strokeWidth="3"
+                      />
+                      {showXLabel && (
+                        <text
+                          x={c.x}
+                          y={svgH - 4}
+                          textAnchor="middle"
+                          fontSize="10"
+                          fill="#94A3B8"
+                        >
+                          {shortLabel}
+                        </text>
+                      )}
+                    </g>
+                  );
+                })}
               </svg>
 
               {/* Selected/Hovered point readout */}
@@ -267,7 +281,7 @@ export const ProgressDashboard: React.FC<ProgressDashboardProps> = ({
             </div>
           </div>
 
-          <div className="my-4">
+          <div className="my-4 relative">
             <Athlete3DViewer
               gender={player.gender}
               fitnessScore={compareView === 'before' ? 14 : player.fitnessScore}
@@ -275,15 +289,39 @@ export const ProgressDashboard: React.FC<ProgressDashboardProps> = ({
               hairColor={player.hairColor}
               outfit={compareView === 'before' ? 'basic' : player.activeOutfit}
               hasBuff={compareView === 'now' && Boolean(player.activeBuff)}
-              pose={compareView === 'before' ? 'tired' : 'idle'}
+              pose={compareView === 'before' ? 'tired' : player.fitnessScore >= 50 ? 'flex' : 'idle'}
               interactive={true}
+              showPoseControls={compareView === 'now'}
+              aiModel={aiAthlete}
               kineticMode={
                 compareView === 'now' && player.completedRoutinesToday.length > 0
                   ? 'routine'
                   : 'none'
               }
-              className="w-full h-52"
+              className="w-full h-56"
             />
+            {onChangeAiAthlete && (
+              <div className="absolute top-2.5 left-2.5 z-10 flex items-center gap-1 p-0.5 bg-black/80 rounded-lg border border-white/10">
+                {[
+                  { label: 'Clásico', v: false },
+                  { label: 'Realista', v: true },
+                ].map((b) => (
+                  <button
+                    key={b.label}
+                    onClick={() => onChangeAiAthlete(b.v)}
+                    className={`px-2 py-1 text-[10px] font-display uppercase font-bold tracking-wider rounded-md cursor-pointer ${
+                      aiAthlete === b.v
+                        ? b.v
+                          ? 'bg-orange-500 text-white'
+                          : 'bg-white text-black'
+                        : 'text-white/55 hover:text-white'
+                    }`}
+                  >
+                    {b.label}
+                  </button>
+                ))}
+              </div>
+            )}
             <div className="mt-2 flex items-center justify-between text-xs">
               <span className={compareView === 'before' ? 'font-semibold text-white/60' : 'font-bold text-orange-500'}>
                 {compareView === 'before' ? 'Inicio · Fuera de Forma' : getPhysiqueStage(player.fitnessScore)}
@@ -314,6 +352,70 @@ export const ProgressDashboard: React.FC<ProgressDashboardProps> = ({
               </div>
             </div>
           </div>
+        </div>
+      </div>
+
+      {/* Section 1.5: Personal Bests by Discipline */}
+      <div className="fc-card p-6">
+        <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
+          <div>
+            <h3 className="text-xl font-bold text-white flex items-center gap-2">
+              <Trophy className="w-5 h-5 text-amber-400" />
+              Récords Personales por Disciplina
+            </h3>
+            <p className="text-xs text-white/50">
+              Supera tu marca anterior en cualquier disciplina para ganar +25 monedas extra
+            </p>
+          </div>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+          {MINIGAMES.map((g) => {
+            const pb = player.personalBests?.[g.id];
+            return (
+              <div
+                key={g.id}
+                className="rounded-xl bg-white/[0.03] border border-white/[0.08] p-4 flex flex-col justify-between"
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[10px] uppercase tracking-[0.14em] text-orange-400 font-semibold">
+                    {g.category}
+                  </span>
+                  <span className="text-[11px] font-mono-tabular text-white/45">
+                    {pb ? `${pb.plays} ses.` : 'Sin jugar'}
+                  </span>
+                </div>
+                <div className="font-display uppercase italic font-black text-lg text-white mt-1 truncate">
+                  {g.title}
+                </div>
+                {pb ? (
+                  <div className="mt-3 pt-2.5 border-t border-white/[0.06] grid grid-cols-3 gap-1 text-center">
+                    <div>
+                      <div className="text-[9px] uppercase text-white/40">Récord</div>
+                      <div className="font-mono-tabular font-bold text-xs text-amber-400">
+                        {pb.bestScore.toLocaleString('es-ES')}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-[9px] uppercase text-white/40">Precisión</div>
+                      <div className="font-mono-tabular font-bold text-xs text-emerald-400">
+                        {pb.bestAccuracy}%
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-[9px] uppercase text-white/40">Combo</div>
+                      <div className="font-mono-tabular font-bold text-xs text-white">
+                        x{pb.bestCombo}
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="mt-3 pt-2.5 border-t border-white/[0.06] text-[11px] text-white/40">
+                    Completa una ronda para fijar tu marca
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </div>
       </div>
 

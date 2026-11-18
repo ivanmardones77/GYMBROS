@@ -24,6 +24,14 @@ export type PhysiqueStage =
 
 export type OutfitId = 'basic' | 'runner' | 'pro' | 'titan';
 
+export interface PersonalBestRecord {
+  bestScore: number;
+  bestAccuracy: number;
+  bestCombo: number;
+  bestDifficulty: DifficultyLevel;
+  plays: number;
+}
+
 export interface PlayerStats {
   name: string;
   gender: Gender;
@@ -72,6 +80,11 @@ export interface PlayerStats {
   dailyMissionsClaimed: string[];
   workoutsToday: number;
   healthyMealsToday: number;
+  personalBests?: Partial<Record<MinigameId, PersonalBestRecord>>;
+  lastActiveDate?: string;
+  lastEnergyTickAt?: number;
+  currentWeekKey?: string;
+  weeklyPrizeClaimedWeek?: string;
 }
 
 export interface ProgressPoint {

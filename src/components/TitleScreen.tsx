@@ -5,12 +5,18 @@ import gymBackdrop from '../assets/images/gym_club_backdrop_1794945942801.jpg';
 
 interface TitleScreenProps {
   onStart: (name: string, gender: Gender, skinTone: string, hairColor: string) => void;
+  aiAthlete?: boolean;
+  onChangeAiAthlete?: (ai: boolean) => void;
 }
 
 const SKIN_TONES = ['#F5D0B5', '#E8B896', '#C68B59', '#8D5524'];
 const HAIR_COLORS = ['#1E293B', '#5C3A21', '#B45309', '#991B1B'];
 
-export const TitleScreen: React.FC<TitleScreenProps> = ({ onStart }) => {
+export const TitleScreen: React.FC<TitleScreenProps> = ({
+  onStart,
+  aiAthlete = true,
+  onChangeAiAthlete,
+}) => {
   const [gender, setGender] = useState<Gender>('male');
   const [name, setName] = useState('');
   const [skinTone, setSkinTone] = useState('#E8B896');
@@ -48,7 +54,7 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({ onStart }) => {
         {/* Left: Brand + live athlete */}
         <div className="lg:col-span-7 flex flex-col">
           <div className="flex items-center gap-2.5 fc-rise">
-            <span className="w-2 h-2 rounded-full bg-orange-500 animate-pulse" />
+            <span className="w-4 h-1 -skew-x-12 bg-orange-500 inline-block" />
             <span className="fc-kicker">Simulador arcade de gimnasio</span>
           </div>
           <h1 className="mt-3 text-[4.2rem] sm:text-[6.2rem] leading-[0.82] text-white fc-rise" style={{ animationDelay: '60ms' }}>
@@ -68,17 +74,43 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({ onStart }) => {
               outfit={previewMode === 'start' ? 'basic' : 'titan'}
               pose={previewMode === 'start' ? 'tired' : 'flex'}
               interactive={true}
+              aiModel={aiAthlete}
               kineticMode={previewMode === 'elite' ? 'routine' : 'none'}
               kineticLabel="Meta élite · energía máxima"
               className="w-full h-[340px]"
             />
-            <div className="absolute top-4 left-4 flex items-center gap-1 p-1 bg-black/60 backdrop-blur rounded-xl border border-white/10">
-              <button type="button" onClick={() => setPreviewMode('start')} className={`px-3 ${seg(previewMode === 'start')}`}>
-                Hoy · 14
-              </button>
-              <button type="button" onClick={() => setPreviewMode('elite')} className={`px-3 ${seg(previewMode === 'elite', true)}`}>
-                Meta · 94
-              </button>
+            <div className="absolute top-3.5 left-3.5 right-3.5 flex items-center justify-between gap-2 pointer-events-none">
+              <div className="pointer-events-auto flex items-center gap-1 p-1 bg-black/80 rounded-xl border border-white/10">
+                <button type="button" onClick={() => setPreviewMode('start')} className={`px-3 ${seg(previewMode === 'start')}`}>
+                  Hoy · 14
+                </button>
+                <button type="button" onClick={() => setPreviewMode('elite')} className={`px-3 ${seg(previewMode === 'elite', true)}`}>
+                  Meta · 94
+                </button>
+              </div>
+              {onChangeAiAthlete && (
+                <div className="pointer-events-auto flex items-center gap-1 p-1 bg-black/80 rounded-xl border border-white/10">
+                  {[
+                    { label: 'Clásico', v: false },
+                    { label: 'Realista', v: true },
+                  ].map((b) => (
+                    <button
+                      key={b.label}
+                      type="button"
+                      onClick={() => onChangeAiAthlete(b.v)}
+                      className={`px-2.5 py-1.5 rounded-lg font-display uppercase tracking-wider font-bold text-xs cursor-pointer transition-colors ${
+                        aiAthlete === b.v
+                          ? b.v
+                            ? 'bg-orange-500 text-white'
+                            : 'bg-white text-black'
+                          : 'text-white/55 hover:text-white'
+                      }`}
+                    >
+                      {b.label}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
 

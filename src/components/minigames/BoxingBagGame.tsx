@@ -3,12 +3,15 @@ import * as THREE from 'three';
 import { DifficultyLevel, MinigameResult } from '../../types/game';
 import { DIFFICULTY_CONFIG } from '../../data/gameData';
 import { sound } from '../../utils/sound';
+import { DuelProgressBanner } from '../DuelProgressBanner';
 import {
   afterDraw,
+  computeResponsiveCameraZ,
   createProceduralGymFloorTexture,
   createStudioRenderer,
   createThreePointLights,
   detectSoftwareGl,
+  disposeObject3D,
   disposeScene,
   dressGymScene,
   addGymDecor,
@@ -53,11 +56,18 @@ export const BoxingBagGame: React.FC<BoxingBagGameProps> = ({
   const [timeLeft, setTimeLeft] = useState(DURATION_SEC);
   const [score, setScore] = useState(0);
   const [combo, setCombo] = useState(0);
-  const [activeTarget, setActiveTarget] = useState<TargetPrompt | null>(null);
+  const [activePad, setActivePad] = useState<PadId | null>(null);
   const [feedback, setFeedback] = useState<string>('¡Golpea los pads o anillos 3D antes de que cierren!');
 
   const mountRef = useRef<HTMLDivElement | null>(null);
+  const padBarRefs = useRef<Record<PadId, HTMLDivElement | null>>({
+    0: null,
+    1: null,
+    2: null,
+    3: null,
+  });
   const timeRef = useRef(DURATION_SEC);
+  const lastSecRef = useRef(DURATION_SEC);
   const scoreRef = useRef(0);
   const comboRef = useRef(0);
   const maxComboRef = useRef(0);
@@ -83,7 +93,11 @@ export const BoxingBagGame: React.FC<BoxingBagGameProps> = ({
       totalMs,
     };
     targetRef.current = next;
-    setActiveTarget(next);
+    setActivePad(pad);
+    ([0, 1, 2, 3] as PadId[]).forEach((p) => {
+      const el = padBarRefs.current[p];
+      if (el) el.style.width = p === pad ? '100%' : '0%';
+    });
   }, [cfg.windowMult]);
 
   const finishGame = useCallback(() => {
@@ -160,15 +174,21 @@ export const BoxingBagGame: React.FC<BoxingBagGameProps> = ({
       return;
     }
 
+    let unmounted = false;
     const scene = new THREE.Scene();
     dressGymScene(scene, { fogNear: 6, fogFar: 15 });
-    addGymDecor(scene, ['dumbbells', 'bench'], { focus: { x: 0, z: 0 }, depth: 2.8 });
+    addGymDecor(scene, ['dumbbells', 'bench'], {
+      focus: { x: 0, z: 0 },
+      depth: 2.8,
+      isCancelled: () => unmounted,
+    });
     scene.environment = envMap;
 
     const w = Math.max(1, container.clientWidth);
     const h = Math.max(1, container.clientHeight);
-    const camera = new THREE.PerspectiveCamera(42, w / h, 0.1, 35);
-    camera.position.set(0, 1.55, 3.9);
+    const aspect = w / h;
+    const camera = new THREE.PerspectiveCamera(42, aspect, 0.1, 35);
+    camera.position.set(0, 1.55, computeResponsiveCameraZ(3.9, aspect, 1.15));
     camera.lookAt(0, 1.35, 0);
 
     createThreePointLights(scene, 5);
@@ -221,7 +241,10 @@ export const BoxingBagGame: React.FC<BoxingBagGameProps> = ({
     let disposedBag = false;
     loadGlbAsset(MODEL_URLS.bag, 1.85, { anchor: 'top' })
       .then(({ root }) => {
-        if (disposedBag) return;
+        if (disposedBag || unmounted) {
+          disposeObject3D(root);
+          return;
+        }
         bagPivot.add(root);
         chain.visible = false;
         bagMesh.visible = false;
@@ -285,7 +308,9 @@ export const BoxingBagGame: React.FC<BoxingBagGameProps> = ({
       if (!container) return;
       const cw = Math.max(1, container.clientWidth);
       const ch = Math.max(1, container.clientHeight);
-      camera.aspect = cw / ch;
+      const aspectNext = cw / ch;
+      camera.aspect = aspectNext;
+      camera.position.z = computeResponsiveCameraZ(3.9, aspectNext, 1.15);
       camera.updateProjectionMatrix();
       renderer.setSize(cw, ch);
     });
@@ -293,7 +318,6 @@ export const BoxingBagGame: React.FC<BoxingBagGameProps> = ({
 
     let last = performance.now();
     let frameId = 0;
-    let unmounted = false;
 
     const tick = (now: number) => {
       if (unmounted) return;
@@ -302,7 +326,11 @@ export const BoxingBagGame: React.FC<BoxingBagGameProps> = ({
       last = now;
 
       timeRef.current = Math.max(0, timeRef.current - dt);
-      setTimeLeft(Math.ceil(timeRef.current));
+      const nextSec = Math.ceil(timeRef.current);
+      if (nextSec !== lastSecRef.current) {
+        lastSecRef.current = nextSec;
+        setTimeLeft(nextSec);
+      }
 
       if (timeRef.current <= 0) {
         finishGame();
@@ -319,8 +347,12 @@ export const BoxingBagGame: React.FC<BoxingBagGameProps> = ({
           sound.playMiss();
           spawnTarget();
         } else {
-          targetRef.current = { ...targetRef.current, remainingMs: rem };
-          setActiveTarget(targetRef.current);
+          targetRef.current.remainingMs = rem;
+          const barEl = padBarRefs.current[targetRef.current.pad];
+          if (barEl) {
+            const pct = Math.max(0, (rem / targetRef.current.totalMs) * 100);
+            barEl.style.width = `${pct}%`;
+          }
         }
       }
 
@@ -360,7 +392,7 @@ export const BoxingBagGame: React.FC<BoxingBagGameProps> = ({
 
       renderer.render(scene, camera);
       if (isSoftwareGl) {
-        frameId = afterDraw(renderer, () => tick(performance.now()));
+        frameId = afterDraw(renderer, () => tick(performance.now()), () => unmounted);
       } else {
         frameId = requestAnimationFrame(tick);
       }
@@ -393,8 +425,6 @@ export const BoxingBagGame: React.FC<BoxingBagGameProps> = ({
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [strikePad]);
-
-  const ringProgress = activeTarget ? Math.max(0, activeTarget.remainingMs / activeTarget.totalMs) : 0;
 
   return (
     <div className="fc-card p-5 sm:p-7 max-w-6xl mx-auto relative overflow-hidden">
@@ -431,18 +461,17 @@ export const BoxingBagGame: React.FC<BoxingBagGameProps> = ({
       </div>
 
       {rivalTargetScore !== undefined && (
-        <div className="mt-4 flex items-center justify-between bg-orange-500/10 border border-orange-500/30 rounded-lg px-4 py-2 text-xs font-medium text-orange-200">
-          <span>Duelo contra {rivalName}</span>
-          <span className="font-mono-tabular font-bold">
-            Meta: {rivalTargetScore.toLocaleString('es-ES')} pts · Actual: {score.toLocaleString('es-ES')}
-          </span>
-        </div>
+        <DuelProgressBanner
+          rivalName={rivalName}
+          rivalTargetScore={rivalTargetScore}
+          score={score}
+        />
       )}
 
       {/* 3D Boxing Ring & Swinging Heavy Bag */}
       <div className="mt-5 relative h-[56vh] min-h-[360px] max-h-[580px] fc-stage rounded-2xl overflow-hidden bg-black select-none">
         <div ref={mountRef} className="w-full h-full cursor-pointer" />
-        <div className="pointer-events-none absolute bottom-3 left-1/2 -translate-x-1/2 bg-black/70 backdrop-blur-sm px-3.5 py-1 rounded-lg text-xs text-white/80 whitespace-nowrap">
+        <div className="pointer-events-none absolute bottom-3 left-1/2 -translate-x-1/2 bg-black/80 border border-white/10 px-3.5 py-1 rounded-lg text-xs text-white/85 whitespace-nowrap">
           {feedback}
         </div>
       </div>
@@ -450,7 +479,7 @@ export const BoxingBagGame: React.FC<BoxingBagGameProps> = ({
       {/* Tactile Strike Pad Buttons */}
       <div className="mt-4 grid grid-cols-2 sm:grid-cols-4 gap-3">
         {([0, 2, 1, 3] as PadId[]).map((padId) => {
-          const isActive = activeTarget?.pad === padId;
+          const isActive = activePad === padId;
           return (
             <button
               key={padId}
@@ -465,10 +494,13 @@ export const BoxingBagGame: React.FC<BoxingBagGameProps> = ({
                 <span className="truncate">{PAD_META[padId].label}</span>
                 <span className="font-mono-tabular opacity-80">{PAD_META[padId].keyHint}</span>
               </div>
-              <div className="mt-2 h-1.5 bg-black/15 rounded-full overflow-hidden">
+              <div className="mt-2 h-1.5 bg-black/25 rounded-full overflow-hidden">
                 <div
+                  ref={(el) => {
+                    padBarRefs.current[padId] = el;
+                  }}
                   className="h-full bg-emerald-400"
-                  style={{ width: isActive ? `${ringProgress * 100}%` : '0%' }}
+                  style={{ width: isActive ? '100%' : '0%' }}
                 />
               </div>
             </button>

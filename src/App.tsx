@@ -9,6 +9,7 @@ import {
   MinigameResult,
   MultiplayerRival,
   OutfitId,
+  PersonalBestRecord,
   PlayerStats,
   ProgressPoint,
   PushNotificationItem,
@@ -24,7 +25,12 @@ import {
   MOTIVATIONAL_PUSH_POOL,
   OUTFITS,
   ROUTINES,
+  applyXpAndLevelUp,
+  computeRivalDuelTarget,
   createInitialPlayer,
+  getDayDiff,
+  getIsoWeekKey,
+  getLocalDateKey,
   getPhysiqueStage,
 } from './data/gameData';
 import { sound } from './utils/sound';
@@ -74,6 +80,7 @@ interface ActiveMinigameSession {
   rivalName?: string;
   routineId?: string;
   routineStepIdx?: number;
+  refundableEnergy?: number;
 }
 
 interface SavedState {
@@ -101,9 +108,26 @@ export default function App() {
   const [roundSummary, setRoundSummary] = useState<SummaryData | null>(null);
   const [showDailyRewards, setShowDailyRewards] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
+  const [showResetConfirm, setShowResetConfirm] = useState(false);
   const [toastPush, setToastPush] = useState<PushNotificationItem | null>(null);
   const [gymImgError, setGymImgError] = useState(false);
-  const [aiAthlete, setAiAthlete] = useState(true);
+  const [aiAthlete, setAiAthlete] = useState<boolean>(() => {
+    try {
+      const saved = localStorage.getItem('gymbros_3d_mode');
+      return saved === null ? true : saved === 'realistic';
+    } catch {
+      return true;
+    }
+  });
+  const handleChangeAiAthlete = useCallback((next: boolean) => {
+    setAiAthlete(next);
+    try {
+      localStorage.setItem('gymbros_3d_mode', next ? 'realistic' : 'classic');
+    } catch {
+      // Ignore storage errors
+    }
+  }, []);
+  const [celebrateFlex, setCelebrateFlex] = useState(false);
 
   // Warm the 3D model cache in the background so minigames open instantly
   useEffect(() => {
@@ -121,10 +145,12 @@ export default function App() {
 
   const toastTimerRef = useRef<number | null>(null);
   const kineticTimerRef = useRef<number | null>(null);
+  const flexTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
     return () => {
       if (kineticTimerRef.current) window.clearTimeout(kineticTimerRef.current);
+      if (flexTimerRef.current) window.clearTimeout(flexTimerRef.current);
     };
   }, []);
 
@@ -147,7 +173,7 @@ export default function App() {
     []
   );
 
-  // Load saved game on mount (clearing previous save version to start fresh)
+  // Load saved game on mount and reconcile calendar day, weekly league & offline energy regen
   useEffect(() => {
     try {
       localStorage.removeItem(LEGACY_STORAGE_KEY);
@@ -155,14 +181,91 @@ export default function App() {
       if (raw) {
         const parsed: SavedState = JSON.parse(raw);
         if (parsed && parsed.player) {
-          setPlayer(parsed.player);
+          const todayKey = getLocalDateKey();
+          const currentWeek = getIsoWeekKey();
+          const now = Date.now();
+          const safeNum = (v: unknown, fallback: number) =>
+            typeof v === 'number' && Number.isFinite(v) ? v : fallback;
+          const rawPlayer = parsed.player;
+          const baseOutfit = OUTFITS[rawPlayer.activeOutfit] ? rawPlayer.activeOutfit : 'basic';
+          const outfitSpec = OUTFITS[baseOutfit];
+          const outfitMaxEnergy = 100 + outfitSpec.energyBonus;
+
+          let loadedPlayer: PlayerStats = {
+            ...rawPlayer,
+            activeOutfit: baseOutfit,
+            maxEnergy: outfitMaxEnergy,
+            energy: Math.max(0, Math.min(outfitMaxEnergy, safeNum(rawPlayer.energy, outfitMaxEnergy))),
+            fitnessScore: Math.max(14, Math.min(100, safeNum(rawPlayer.fitnessScore, 14))),
+            weightKg: Math.max(40, safeNum(rawPlayer.weightKg, 85)),
+            bodyFatPct: Math.max(8, Math.min(50, safeNum(rawPlayer.bodyFatPct, 25))),
+            muscleKg: Math.max(20, safeNum(rawPlayer.muscleKg, 30)),
+            coins: Math.max(0, safeNum(rawPlayer.coins, 0)),
+            xp: Math.max(0, safeNum(rawPlayer.xp, 0)),
+            xpToNext: Math.max(50, safeNum(rawPlayer.xpToNext, 120)),
+            level: Math.max(1, safeNum(rawPlayer.level, 1)),
+            streakDays: Math.max(1, Math.min(7, safeNum(rawPlayer.streakDays, 1))),
+            weeklyScore: Math.max(0, safeNum(rawPlayer.weeklyScore, 0)),
+            totalWorkouts: Math.max(0, safeNum(rawPlayer.totalWorkouts, 0)),
+            perfectHitsTotal: Math.max(0, safeNum(rawPlayer.perfectHitsTotal, 0)),
+            hydrationPct: Math.max(10, Math.min(100, safeNum(rawPlayer.hydrationPct, 75))),
+            personalBests: rawPlayer.personalBests || {},
+            unlockedOutfits: Array.isArray(rawPlayer.unlockedOutfits) && rawPlayer.unlockedOutfits.length > 0
+              ? rawPlayer.unlockedOutfits
+              : ['basic'],
+            claimedDailyDays: Array.isArray(rawPlayer.claimedDailyDays) ? rawPlayer.claimedDailyDays : [],
+            dailyMissionsClaimed: Array.isArray(rawPlayer.dailyMissionsClaimed) ? rawPlayer.dailyMissionsClaimed : [],
+            completedRoutinesToday: Array.isArray(rawPlayer.completedRoutinesToday) ? rawPlayer.completedRoutinesToday : [],
+          };
+
+          // Weekly league rollover
+          let loadedRivals = parsed.rivals || INITIAL_RIVALS;
+          const savedWeek = loadedPlayer.currentWeekKey || currentWeek;
+          if (savedWeek !== currentWeek) {
+            loadedPlayer.weeklyScore = 0;
+            loadedPlayer.currentWeekKey = currentWeek;
+            loadedRivals = INITIAL_RIVALS;
+          } else {
+            loadedPlayer.currentWeekKey = currentWeek;
+          }
+
+          // Real calendar day progression & offline energy regen
+          const savedDate = loadedPlayer.lastActiveDate || todayKey;
+          const diffDays = getDayDiff(savedDate, todayKey);
+          if (diffDays >= 1) {
+            loadedPlayer = {
+              ...loadedPlayer,
+              streakDays: diffDays === 1 ? Math.min(7, loadedPlayer.streakDays + 1) : 1,
+              claimedDailyDays: diffDays > 1 ? [] : loadedPlayer.claimedDailyDays,
+              energy: outfitMaxEnergy,
+              hydrationPct: 75,
+              workoutsToday: 0,
+              healthyMealsToday: 0,
+              proteinToday: 20,
+              dailyMissionsClaimed: [],
+              completedRoutinesToday: [],
+              lastActiveDate: todayKey,
+              lastEnergyTickAt: now,
+            };
+          } else {
+            const lastTick = loadedPlayer.lastEnergyTickAt || now;
+            const ticks = Math.floor(Math.max(0, now - lastTick) / 45000);
+            loadedPlayer = {
+              ...loadedPlayer,
+              energy: Math.min(outfitMaxEnergy, loadedPlayer.energy + ticks),
+              lastActiveDate: todayKey,
+              lastEnergyTickAt: ticks > 0 ? now : lastTick,
+            };
+          }
+
+          setPlayer(loadedPlayer);
           setHistory(parsed.history || []);
           setWorkouts(parsed.workouts || []);
           setUnlockedAchievements(parsed.unlockedAchievements || []);
-          setRivals(parsed.rivals || INITIAL_RIVALS);
+          setRivals(loadedRivals);
           setNotifications(parsed.notifications || []);
-          sound.setEnabled(parsed.player.soundEnabled);
-          if ((parsed.player.completedRoutinesToday?.length || 0) > 0) {
+          sound.setEnabled(loadedPlayer.soundEnabled);
+          if ((loadedPlayer.completedRoutinesToday?.length || 0) > 0) {
             setKineticMode('routine');
             setKineticLabel('Energía Cinética · Rutina Completada');
           }
@@ -236,7 +339,7 @@ export default function App() {
     []
   );
 
-  // Periodic motivational push notifications & subtle rival activity
+  // Periodic motivational push notifications
   useEffect(() => {
     if (screen !== 'PLAYING' || !player || !player.pushEnabled) return;
 
@@ -245,8 +348,16 @@ export default function App() {
       const template =
         MOTIVATIONAL_PUSH_POOL[Math.floor(Math.random() * MOTIVATIONAL_PUSH_POOL.length)];
       triggerPushNotification(template.title, template.body, template.category, true);
+    }, (player.pushIntervalSec || 75) * 1000);
 
-      // Gentle rival progression to keep multiplayer weekly challenge alive
+    return () => window.clearInterval(timer);
+  }, [screen, player?.pushEnabled, player?.pushIntervalSec, activeSession, triggerPushNotification]);
+
+  // Subtle weekly rival activity decoupled from notification preferences
+  useEffect(() => {
+    if (screen !== 'PLAYING') return;
+    const timer = window.setInterval(() => {
+      if (activeSession) return;
       setRivals((prev) =>
         prev.map((r) =>
           Math.random() > 0.65
@@ -254,10 +365,25 @@ export default function App() {
             : r
         )
       );
-    }, (player.pushIntervalSec || 75) * 1000);
-
+    }, 75000);
     return () => window.clearInterval(timer);
-  }, [screen, player?.pushEnabled, player?.pushIntervalSec, activeSession, triggerPushNotification]);
+  }, [screen, activeSession]);
+
+  // Passive energy regeneration (+1 energy every 45s while playing)
+  useEffect(() => {
+    if (screen !== 'PLAYING') return;
+    const timer = window.setInterval(() => {
+      setPlayer((prev) => {
+        if (!prev || prev.energy >= prev.maxEnergy) return prev;
+        return {
+          ...prev,
+          energy: Math.min(prev.maxEnergy, prev.energy + 1),
+          lastEnergyTickAt: Date.now(),
+        };
+      });
+    }, 45000);
+    return () => window.clearInterval(timer);
+  }, [screen]);
 
   const handleStartNewGame = (
     name: string,
@@ -382,6 +508,7 @@ export default function App() {
       routineId?: string;
       routineStepIdx?: number;
       skipEnergyCheck?: boolean;
+      refundableEnergy?: number;
     }
   ) => {
     if (!player) return;
@@ -407,9 +534,22 @@ export default function App() {
 
     if (!opts?.skipEnergyCheck) {
       setPlayer((prev) =>
-        prev ? { ...prev, energy: Math.max(0, prev.energy - cfg.energyCost) } : prev
+        prev
+          ? {
+              ...prev,
+              energy: Math.max(0, prev.energy - cfg.energyCost),
+              lastEnergyTickAt: Date.now(),
+            }
+          : prev
       );
     }
+
+    const refundableEnergy =
+      opts?.refundableEnergy !== undefined
+        ? opts.refundableEnergy
+        : opts?.skipEnergyCheck
+        ? 0
+        : cfg.energyCost;
 
     sound.playTap();
     setActiveSession({
@@ -419,7 +559,25 @@ export default function App() {
       rivalName: opts?.rivalName,
       routineId: opts?.routineId,
       routineStepIdx: opts?.routineStepIdx,
+      refundableEnergy,
     });
+  };
+
+  const handleCancelMinigame = () => {
+    if (activeSession?.refundableEnergy && activeSession.refundableEnergy > 0) {
+      const refund = activeSession.refundableEnergy;
+      setPlayer((prev) =>
+        prev
+          ? {
+              ...prev,
+              energy: Math.min(prev.maxEnergy, prev.energy + refund),
+              lastEnergyTickAt: Date.now(),
+            }
+          : prev
+      );
+    }
+    sound.playTap();
+    setActiveSession(null);
   };
 
   const launchRoutine = (routine: RoutineProgram) => {
@@ -443,13 +601,20 @@ export default function App() {
     }
 
     setPlayer((prev) =>
-      prev ? { ...prev, energy: Math.max(0, prev.energy - routine.energyCost) } : prev
+      prev
+        ? {
+            ...prev,
+            energy: Math.max(0, prev.energy - routine.energyCost),
+            lastEnergyTickAt: Date.now(),
+          }
+        : prev
     );
 
     launchMinigame(routine.minigameOrder[0], routine.recommendedDifficulty, {
       routineId: routine.id,
       routineStepIdx: 0,
       skipEnergyCheck: true,
+      refundableEnergy: routine.energyCost,
     });
   };
 
@@ -466,19 +631,49 @@ export default function App() {
 
     const buffMuscle = player.activeBuff ? player.activeBuff.muscleMultiplier : 1;
     const buffFat = player.activeBuff ? player.activeBuff.fatBurnMultiplier : 1;
+    const outfitSpec = OUTFITS[player.activeOutfit] || OUTFITS.basic;
 
     const muscleGain = Number(
-      (meta.baseMuscleGain * cfg.rewardMult * performanceFactor * buffMuscle * 0.55).toFixed(2)
+      (
+        meta.baseMuscleGain *
+        cfg.rewardMult *
+        performanceFactor *
+        buffMuscle *
+        outfitSpec.muscleMult *
+        0.55
+      ).toFixed(2)
     );
     const fatLossPct = Number(
-      (meta.baseFatLoss * cfg.rewardMult * performanceFactor * buffFat * 0.65).toFixed(2)
+      (
+        meta.baseFatLoss *
+        cfg.rewardMult *
+        performanceFactor *
+        buffFat *
+        outfitSpec.fatMult *
+        0.65
+      ).toFixed(2)
     );
 
     const duelWon =
       result.rivalTargetScore !== undefined && result.score >= result.rivalTargetScore;
 
-    let coinsEarned = Math.round((45 + result.score * 0.045) * cfg.rewardMult);
-    let xpEarned = Math.round((35 + result.score * 0.035) * cfg.rewardMult);
+    // Personal Best check
+    const existingPbs = player.personalBests || {};
+    const prevPb = existingPbs[result.gameId];
+    const prevBestScore = prevPb?.bestScore ?? 0;
+    const isNewRecord = result.score > prevBestScore;
+    const pbBonusCoins = prevBestScore > 0 && isNewRecord ? 25 : 0;
+    const nextPb: PersonalBestRecord = {
+      bestScore: Math.max(prevBestScore, result.score),
+      bestAccuracy: Math.max(prevPb?.bestAccuracy ?? 0, accuracyPct),
+      bestCombo: Math.max(prevPb?.bestCombo ?? 0, result.maxCombo),
+      bestDifficulty: Math.max(prevPb?.bestDifficulty ?? 1, result.difficulty) as DifficultyLevel,
+      plays: (prevPb?.plays ?? 0) + 1,
+    };
+
+    let coinsEarned =
+      Math.round((45 + result.score * 0.045) * cfg.rewardMult * outfitSpec.coinMult) + pbBonusCoins;
+    let xpEarned = Math.round((35 + result.score * 0.035) * cfg.rewardMult * outfitSpec.xpMult);
     let weeklyAdd = Math.round(result.score * 0.45);
 
     if (duelWon) {
@@ -537,16 +732,9 @@ export default function App() {
     );
 
     // XP & Leveling
-    let nextXp = player.xp + xpEarned;
-    let nextLevel = player.level;
-    let nextXpToNext = player.xpToNext;
-    let leveledUp = false;
-    while (nextXp >= nextXpToNext) {
-      nextXp -= nextXpToNext;
-      nextLevel += 1;
-      nextXpToNext = Math.round(nextXpToNext * 1.28);
-      leveledUp = true;
-    }
+    const xpRes1 = applyXpAndLevelUp(player.xp, player.level, player.xpToNext, xpEarned);
+    let nextLevel = xpRes1.level;
+    let leveledUp = xpRes1.leveledUp;
 
     const nextBuff = player.activeBuff
       ? player.activeBuff.sessionsLeft > 1
@@ -570,9 +758,9 @@ export default function App() {
       agility:
         player.agility + (result.gameId === 'boxing' || result.gameId === 'battle_ropes' ? 2 : 1),
       fitnessScore: nextFitnessScore,
-      level: nextLevel,
-      xp: nextXp,
-      xpToNext: nextXpToNext,
+      level: xpRes1.level,
+      xp: xpRes1.xp,
+      xpToNext: xpRes1.xpToNext,
       coins: player.coins + coinsEarned,
       energy: Math.min(player.maxEnergy, player.energy + bonusEnergy),
       hydrationPct: Math.max(15, player.hydrationPct - 9),
@@ -588,14 +776,33 @@ export default function App() {
         routineCompletedBonus && activeRoutine
           ? Array.from(new Set([...player.completedRoutinesToday, activeRoutine.id]))
           : player.completedRoutinesToday,
+      personalBests: {
+        ...existingPbs,
+        [result.gameId]: nextPb,
+      },
+      lastActiveDate: getLocalDateKey(),
+      lastEnergyTickAt: Date.now(),
+      currentWeekKey: getIsoWeekKey(),
     };
 
     const achBonuses = evaluateAchievements(updatedPlayer, unlockedAchievements);
     if (achBonuses.bonusCoins > 0 || achBonuses.bonusXp > 0) {
+      const xpRes2 = applyXpAndLevelUp(
+        updatedPlayer.xp,
+        updatedPlayer.level,
+        updatedPlayer.xpToNext,
+        achBonuses.bonusXp
+      );
+      if (xpRes2.leveledUp) {
+        leveledUp = true;
+        nextLevel = xpRes2.level;
+      }
       updatedPlayer = {
         ...updatedPlayer,
         coins: updatedPlayer.coins + achBonuses.bonusCoins,
-        xp: updatedPlayer.xp + achBonuses.bonusXp,
+        xp: xpRes2.xp,
+        level: xpRes2.level,
+        xpToNext: xpRes2.xpToNext,
       };
     }
 
@@ -637,6 +844,8 @@ export default function App() {
         'Motivación',
         false
       );
+    } else if (isNewRecord && prevBestScore > 0) {
+      sound.playNewRecord();
     } else {
       sound.playCoin();
     }
@@ -656,6 +865,14 @@ export default function App() {
       );
     }
 
+    if (leveledUp || duelWon || Boolean(routineCompletedBonus)) {
+      setCelebrateFlex(true);
+      if (flexTimerRef.current) window.clearTimeout(flexTimerRef.current);
+      flexTimerRef.current = window.setTimeout(() => {
+        setCelebrateFlex(false);
+      }, 18000);
+    }
+
     setRoundSummary({
       gameTitle: meta.title,
       score: result.score,
@@ -670,6 +887,8 @@ export default function App() {
       newLevel: nextLevel,
       duelWon,
       rivalName: result.rivalName,
+      isNewRecord,
+      previousBestScore: prevBestScore,
       hasNextRoutineStep,
       routineCompletedBonus,
       unlockedAchievements: achBonuses.unlockedItems,
@@ -718,11 +937,29 @@ export default function App() {
     };
 
     const bonuses = evaluateAchievements(nextPlayer, unlockedAchievements);
+    const xpRes = applyXpAndLevelUp(
+      nextPlayer.xp,
+      nextPlayer.level,
+      nextPlayer.xpToNext,
+      bonuses.bonusXp
+    );
     setPlayer({
       ...nextPlayer,
       coins: nextPlayer.coins + bonuses.bonusCoins,
-      xp: nextPlayer.xp + bonuses.bonusXp,
+      xp: xpRes.xp,
+      level: xpRes.level,
+      xpToNext: xpRes.xpToNext,
     });
+
+    if (xpRes.leveledUp) {
+      sound.playLevelUp();
+      triggerPushNotification(
+        `¡Nivel ${xpRes.level} Alcanzado!`,
+        'Tu disciplina nutricional impulsó tu siguiente nivel.',
+        'Motivación',
+        false
+      );
+    }
 
     triggerPushNotification(
       isHealthy ? 'Nutrición Óptima' : 'Antojo Registrado',
@@ -744,14 +981,18 @@ export default function App() {
       step.outfitUnlock && !player.unlockedOutfits.includes(step.outfitUnlock)
         ? [...player.unlockedOutfits, step.outfitUnlock]
         : player.unlockedOutfits;
+    const nextActiveOutfit = step.outfitUnlock || player.activeOutfit;
+    const nextMaxEnergy = 100 + (OUTFITS[nextActiveOutfit]?.energyBonus ?? 0);
+    const energyDelta = Math.max(0, nextMaxEnergy - player.maxEnergy);
 
     setPlayer({
       ...player,
       coins: player.coins + step.coins,
-      energy: Math.min(player.maxEnergy, player.energy + (step.energyBonus || 0)),
+      maxEnergy: nextMaxEnergy,
+      energy: Math.min(nextMaxEnergy, player.energy + (step.energyBonus || 0) + energyDelta),
       claimedDailyDays: [...player.claimedDailyDays, day],
       unlockedOutfits: nextOutfits,
-      activeOutfit: step.outfitUnlock || player.activeOutfit,
+      activeOutfit: nextActiveOutfit,
     });
 
     triggerPushNotification(
@@ -764,19 +1005,82 @@ export default function App() {
 
   const handleClaimDailyMission = (missionId: string, coins: number, xp: number) => {
     if (!player || player.dailyMissionsClaimed.includes(missionId)) return;
-    sound.playCoin();
-    setPlayer({
+    let xpRes = applyXpAndLevelUp(player.xp, player.level, player.xpToNext, xp);
+    let nextPlayer: PlayerStats = {
       ...player,
       coins: player.coins + coins,
-      xp: player.xp + xp,
+      xp: xpRes.xp,
+      level: xpRes.level,
+      xpToNext: xpRes.xpToNext,
       dailyMissionsClaimed: [...player.dailyMissionsClaimed, missionId],
-    });
+    };
+    const bonuses = evaluateAchievements(nextPlayer, unlockedAchievements);
+    if (bonuses.bonusCoins > 0 || bonuses.bonusXp > 0) {
+      const xpRes2 = applyXpAndLevelUp(nextPlayer.xp, nextPlayer.level, nextPlayer.xpToNext, bonuses.bonusXp);
+      xpRes = { ...xpRes2, leveledUp: xpRes.leveledUp || xpRes2.leveledUp };
+      nextPlayer = {
+        ...nextPlayer,
+        coins: nextPlayer.coins + bonuses.bonusCoins,
+        xp: xpRes2.xp,
+        level: xpRes2.level,
+        xpToNext: xpRes2.xpToNext,
+      };
+    }
+    if (xpRes.leveledUp) {
+      sound.playLevelUp();
+      triggerPushNotification(
+        `¡Nivel ${xpRes.level} Alcanzado!`,
+        'Completaste tus misiones diarias y subiste de nivel.',
+        'Motivación',
+        false
+      );
+    } else {
+      sound.playCoin();
+    }
+    setPlayer(nextPlayer);
+  };
+
+  const handleClaimWeeklyChest = (rank: number, coins: number, xp: number) => {
+    if (!player) return;
+    const weekKey = getIsoWeekKey();
+    if (player.weeklyPrizeClaimedWeek === weekKey) return;
+    const xpRes = applyXpAndLevelUp(player.xp, player.level, player.xpToNext, xp);
+    let nextPlayer: PlayerStats = {
+      ...player,
+      coins: player.coins + coins,
+      xp: xpRes.xp,
+      level: xpRes.level,
+      xpToNext: xpRes.xpToNext,
+      weeklyPrizeClaimedWeek: weekKey,
+    };
+    const bonuses = evaluateAchievements(nextPlayer, unlockedAchievements);
+    if (bonuses.bonusCoins > 0 || bonuses.bonusXp > 0) {
+      const xpRes2 = applyXpAndLevelUp(nextPlayer.xp, nextPlayer.level, nextPlayer.xpToNext, bonuses.bonusXp);
+      nextPlayer = {
+        ...nextPlayer,
+        coins: nextPlayer.coins + bonuses.bonusCoins,
+        xp: xpRes2.xp,
+        level: xpRes2.level,
+        xpToNext: xpRes2.xpToNext,
+      };
+    }
+    sound.playLevelUp();
+    setPlayer(nextPlayer);
+    setCelebrateFlex(true);
+    if (flexTimerRef.current) window.clearTimeout(flexTimerRef.current);
+    flexTimerRef.current = window.setTimeout(() => setCelebrateFlex(false), 18000);
+    triggerPushNotification(
+      `¡Cofre Top #${rank} Reclamado!`,
+      `Recibiste +${coins} monedas y +${xp} XP por tu posición semanal.`,
+      'Recompensa',
+      false
+    );
   };
 
   const handleSimulateNextDay = () => {
     if (!player) return;
     sound.playTap();
-    setPlayer({
+    let nextPlayer: PlayerStats = {
       ...player,
       streakDays: Math.min(7, player.streakDays + 1),
       energy: player.maxEnergy,
@@ -786,7 +1090,21 @@ export default function App() {
       proteinToday: 20,
       dailyMissionsClaimed: [],
       completedRoutinesToday: [],
-    });
+      lastActiveDate: getLocalDateKey(),
+      lastEnergyTickAt: Date.now(),
+    };
+    const bonuses = evaluateAchievements(nextPlayer, unlockedAchievements);
+    if (bonuses.bonusCoins > 0 || bonuses.bonusXp > 0) {
+      const xpRes = applyXpAndLevelUp(nextPlayer.xp, nextPlayer.level, nextPlayer.xpToNext, bonuses.bonusXp);
+      nextPlayer = {
+        ...nextPlayer,
+        coins: nextPlayer.coins + bonuses.bonusCoins,
+        xp: xpRes.xp,
+        level: xpRes.level,
+        xpToNext: xpRes.xpToNext,
+      };
+    }
+    setPlayer(nextPlayer);
     if (kineticTimerRef.current) window.clearTimeout(kineticTimerRef.current);
     setKineticMode('none');
     setKineticLabel('');
@@ -799,9 +1117,16 @@ export default function App() {
 
   const handleSelectOrBuyOutfit = (outfitId: OutfitId) => {
     if (!player) return;
+    const nextMaxEnergy = 100 + (OUTFITS[outfitId]?.energyBonus ?? 0);
+    const energyDelta = Math.max(0, nextMaxEnergy - player.maxEnergy);
     if (player.unlockedOutfits.includes(outfitId)) {
       sound.playTap();
-      setPlayer({ ...player, activeOutfit: outfitId });
+      setPlayer({
+        ...player,
+        activeOutfit: outfitId,
+        maxEnergy: nextMaxEnergy,
+        energy: Math.min(nextMaxEnergy, player.energy + energyDelta),
+      });
       return;
     }
     const cost = OUTFITS[outfitId].cost;
@@ -819,6 +1144,8 @@ export default function App() {
       coins: player.coins - cost,
       unlockedOutfits: [...player.unlockedOutfits, outfitId],
       activeOutfit: outfitId,
+      maxEnergy: nextMaxEnergy,
+      energy: Math.min(nextMaxEnergy, player.energy + energyDelta),
     });
   };
 
@@ -855,6 +1182,7 @@ export default function App() {
     setRoundSummary(null);
     setShowDailyRewards(false);
     setShowNotifications(false);
+    setShowResetConfirm(false);
     setToastPush(null);
     setSelectedDifficulty(1);
     setActiveTab('gym');
@@ -862,7 +1190,13 @@ export default function App() {
   };
 
   if (screen === 'TITLE_MENU' || !player) {
-    return <TitleScreen onStart={handleStartNewGame} />;
+    return (
+      <TitleScreen
+        onStart={handleStartNewGame}
+        aiAthlete={aiAthlete}
+        onChangeAiAthlete={handleChangeAiAthlete}
+      />
+    );
   }
 
   const unreadNotifs = notifications.filter((n) => !n.read).length;
@@ -1044,7 +1378,7 @@ export default function App() {
                 rivalTargetScore={activeSession.rivalTargetScore}
                 rivalName={activeSession.rivalName}
                 onComplete={handleMinigameComplete}
-                onCancel={() => setActiveSession(null)}
+                onCancel={handleCancelMinigame}
               />
             )}
             {activeSession.gameId === 'sprint' && (
@@ -1060,7 +1394,7 @@ export default function App() {
                 rivalTargetScore={activeSession.rivalTargetScore}
                 rivalName={activeSession.rivalName}
                 onComplete={handleMinigameComplete}
-                onCancel={() => setActiveSession(null)}
+                onCancel={handleCancelMinigame}
               />
             )}
             {activeSession.gameId === 'boxing' && (
@@ -1069,7 +1403,7 @@ export default function App() {
                 rivalTargetScore={activeSession.rivalTargetScore}
                 rivalName={activeSession.rivalName}
                 onComplete={handleMinigameComplete}
-                onCancel={() => setActiveSession(null)}
+                onCancel={handleCancelMinigame}
               />
             )}
             {activeSession.gameId === 'macros' && (
@@ -1078,7 +1412,7 @@ export default function App() {
                 rivalTargetScore={activeSession.rivalTargetScore}
                 rivalName={activeSession.rivalName}
                 onComplete={handleMinigameComplete}
-                onCancel={() => setActiveSession(null)}
+                onCancel={handleCancelMinigame}
               />
             )}
             {activeSession.gameId === 'squats' && (
@@ -1094,7 +1428,7 @@ export default function App() {
                 rivalTargetScore={activeSession.rivalTargetScore}
                 rivalName={activeSession.rivalName}
                 onComplete={handleMinigameComplete}
-                onCancel={() => setActiveSession(null)}
+                onCancel={handleCancelMinigame}
               />
             )}
             {activeSession.gameId === 'rope' && (
@@ -1110,7 +1444,7 @@ export default function App() {
                 rivalTargetScore={activeSession.rivalTargetScore}
                 rivalName={activeSession.rivalName}
                 onComplete={handleMinigameComplete}
-                onCancel={() => setActiveSession(null)}
+                onCancel={handleCancelMinigame}
               />
             )}
             {activeSession.gameId === 'battle_ropes' && (
@@ -1126,7 +1460,7 @@ export default function App() {
                 rivalTargetScore={activeSession.rivalTargetScore}
                 rivalName={activeSession.rivalName}
                 onComplete={handleMinigameComplete}
-                onCancel={() => setActiveSession(null)}
+                onCancel={handleCancelMinigame}
               />
             )}
           </div>
@@ -1150,7 +1484,7 @@ export default function App() {
                         </h1>
                       </div>
                       <button
-                        onClick={handleResetProfile}
+                        onClick={() => setShowResetConfirm(true)}
                         title="Reiniciar datos del juego"
                         className="px-2.5 py-1.5 text-xs font-medium text-white/40 hover:text-rose-400 rounded-lg hover:bg-rose-500/10 flex items-center gap-1.5 cursor-pointer"
                       >
@@ -1168,6 +1502,7 @@ export default function App() {
                         outfit={player.activeOutfit}
                         energy={player.energy}
                         hasBuff={Boolean(player.activeBuff)}
+                        pose={celebrateFlex ? 'flex' : 'idle'}
                         interactive={true}
                         kineticMode={kineticMode}
                         kineticBurstKey={kineticBurstKey}
@@ -1175,14 +1510,14 @@ export default function App() {
                         aiModel={aiAthlete}
                         className="w-full flex-1 min-h-[380px] fc-stage !rounded-2xl"
                       />
-                      <div className="absolute top-3 left-3 z-10 flex items-center gap-1 p-1 bg-black/60 backdrop-blur rounded-xl border border-white/10">
+                      <div className="absolute top-3 left-3 z-10 flex items-center gap-1 p-1 bg-black/80 rounded-xl border border-white/10">
                         {[
                           { on: !aiAthlete, label: 'Clásico', v: false },
                           { on: aiAthlete, label: 'Realista', v: true },
                         ].map((b) => (
                           <button
                             key={b.label}
-                            onClick={() => setAiAthlete(b.v)}
+                            onClick={() => handleChangeAiAthlete(b.v)}
                             className={`px-3 py-1.5 rounded-lg font-display uppercase tracking-wider font-bold text-sm cursor-pointer transition-colors ${
                               b.on ? (b.v ? 'bg-orange-500 text-white' : 'bg-white text-black') : 'text-white/55 hover:text-white'
                             }`}
@@ -1247,6 +1582,9 @@ export default function App() {
                               <div className="truncate font-display uppercase font-bold text-sm tracking-wide">{o.name}</div>
                               <div className={`text-[10px] font-semibold uppercase tracking-wider ${active ? 'text-orange-600' : unlocked ? 'text-emerald-400' : 'text-amber-400'}`}>
                                 {active ? 'Equipada' : unlocked ? 'Disponible' : `${o.cost} monedas`}
+                              </div>
+                              <div className={`text-[10px] mt-0.5 truncate ${active ? 'text-black/65' : 'text-white/45'}`}>
+                                {o.perkLabel}
                               </div>
                             </button>
                           );
@@ -1391,6 +1729,7 @@ export default function App() {
                           game={game}
                           meta={cfg.label}
                           energyCost={cfg.energyCost}
+                          bestScore={player.personalBests?.[game.id]?.bestScore}
                           onPlay={() => launchMinigame(game.id, selectedDifficulty)}
                         />
                       );
@@ -1465,6 +1804,7 @@ export default function App() {
                         meta={cfg.label}
                         energyCost={cfg.energyCost}
                         kcal={Math.round(game.baseCalories * cfg.rewardMult)}
+                        bestScore={player.personalBests?.[game.id]?.bestScore}
                         onPlay={() => launchMinigame(game.id, selectedDifficulty)}
                       />
                     );
@@ -1489,6 +1829,8 @@ export default function App() {
                 history={history}
                 workouts={workouts}
                 unlockedAchievementIds={unlockedAchievements}
+                aiAthlete={aiAthlete}
+                onChangeAiAthlete={handleChangeAiAthlete}
               />
             )}
 
@@ -1499,10 +1841,14 @@ export default function App() {
                 rivals={rivals}
                 onStartDuel={(gameId, difficulty, rival) =>
                   launchMinigame(gameId, difficulty, {
-                    rivalTargetScore: Math.round(900 + difficulty * 320),
+                    rivalTargetScore:
+                      rival.id === 'friend-duel'
+                        ? rival.weeklyScore
+                        : computeRivalDuelTarget(rival, difficulty),
                     rivalName: rival.name,
                   })
                 }
+                onClaimWeeklyChest={handleClaimWeeklyChest}
               />
             )}
           </>
@@ -1581,6 +1927,33 @@ export default function App() {
           }
           onClose={() => setShowNotifications(false)}
         />
+      )}
+      {/* Reset Profile Confirmation Modal */}
+      {showResetConfirm && (
+        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-[#141414] border border-white/10 rounded-2xl max-w-sm w-full p-6 shadow-2xl">
+            <h3 className="font-display italic uppercase font-black text-2xl text-white">
+              ¿Reiniciar Perfil?
+            </h3>
+            <p className="text-xs text-white/60 mt-2 leading-relaxed">
+              Se borrará todo tu progreso actual, récords personales, equipación desbloqueada y puntuación semanal. Esta acción no se puede deshacer.
+            </p>
+            <div className="mt-5 flex gap-3">
+              <button
+                onClick={() => setShowResetConfirm(false)}
+                className="flex-1 py-2.5 px-4 rounded-xl bg-white/[0.07] hover:bg-white/[0.14] text-white font-semibold text-xs uppercase tracking-wider cursor-pointer"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={handleResetProfile}
+                className="flex-1 py-2.5 px-4 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs uppercase tracking-wider cursor-pointer"
+              >
+                Sí, Reiniciar
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

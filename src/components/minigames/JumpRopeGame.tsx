@@ -3,8 +3,10 @@ import * as THREE from 'three';
 import { DifficultyLevel, MinigameResult } from '../../types/game';
 import { DIFFICULTY_CONFIG } from '../../data/gameData';
 import { sound } from '../../utils/sound';
+import { DuelProgressBanner } from '../DuelProgressBanner';
 import {
   afterDraw,
+  computeResponsiveCameraZ,
   createProceduralGymFloorTexture,
   createStudioRenderer,
   createThreePointLights,
@@ -45,6 +47,7 @@ export const JumpRopeGame: React.FC<JumpRopeGameProps> = ({
 
   const mountRef = useRef<HTMLDivElement | null>(null);
   const timeRef = useRef(DURATION_SEC);
+  const lastSecRef = useRef(DURATION_SEC);
   const scoreRef = useRef(0);
   const comboRef = useRef(0);
   const maxComboRef = useRef(0);
@@ -142,15 +145,20 @@ export const JumpRopeGame: React.FC<JumpRopeGameProps> = ({
       return;
     }
 
+    let unmounted = false;
     const scene = new THREE.Scene();
     dressGymScene(scene, { fogNear: 6, fogFar: 15 });
-    addGymDecor(scene, ['squatRack', 'bench'], { focus: { x: 0, z: 0 }, depth: 2.8 });
+    addGymDecor(scene, ['squatRack', 'bench'], {
+      focus: { x: 0, z: 0 },
+      depth: 2.8,
+      isCancelled: () => unmounted,
+    });
     scene.environment = envMap;
 
     const w = Math.max(1, container.clientWidth);
     const h = Math.max(1, container.clientHeight);
     const camera = new THREE.PerspectiveCamera(42, w / h, 0.1, 35);
-    camera.position.set(0.35, 1.55, 3.85);
+    camera.position.set(0.35, 1.55, computeResponsiveCameraZ(3.85, w / h, 1.0));
     camera.lookAt(0, 0.85, 0);
 
     createThreePointLights(scene, 5);
@@ -230,7 +238,9 @@ export const JumpRopeGame: React.FC<JumpRopeGameProps> = ({
       if (!container) return;
       const cw = Math.max(1, container.clientWidth);
       const ch = Math.max(1, container.clientHeight);
-      camera.aspect = cw / ch;
+      const aspect = cw / ch;
+      camera.aspect = aspect;
+      camera.position.z = computeResponsiveCameraZ(3.85, aspect, 1.0);
       camera.updateProjectionMatrix();
       renderer.setSize(cw, ch);
     });
@@ -238,7 +248,6 @@ export const JumpRopeGame: React.FC<JumpRopeGameProps> = ({
 
     let last = performance.now();
     let frameId = 0;
-    let unmounted = false;
 
     const tick = (now: number) => {
       if (unmounted) return;
@@ -246,7 +255,11 @@ export const JumpRopeGame: React.FC<JumpRopeGameProps> = ({
       last = now;
 
       timeRef.current = Math.max(0, timeRef.current - dt);
-      setTimeLeft(Math.ceil(timeRef.current));
+      const nextSec = Math.ceil(timeRef.current);
+      if (nextSec !== lastSecRef.current) {
+        lastSecRef.current = nextSec;
+        setTimeLeft(nextSec);
+      }
 
       if (timeRef.current <= 0) {
         finishGame();
@@ -268,8 +281,9 @@ export const JumpRopeGame: React.FC<JumpRopeGameProps> = ({
         missedCheckedThisCycleRef.current = false;
       }
 
-      // Check rope trip when rope passes bottom (PI/2)
-      if (!missedCheckedThisCycleRef.current && prevMod < Math.PI * 0.5 && curMod >= Math.PI * 0.5) {
+      // Check rope trip only AFTER the valid post-bottom window passes so late valid jumps aren't penalized
+      const tripCheckAngle = Math.PI * 0.5 + Math.max(0.35, 0.55 * cfg.windowMult);
+      if (!missedCheckedThisCycleRef.current && prevMod < tripCheckAngle && curMod >= tripCheckAngle) {
         missedCheckedThisCycleRef.current = true;
         if (jumpHeightRef.current < 0.08 && !jumpScoredThisCycleRef.current) {
           comboRef.current = 0;
@@ -341,7 +355,7 @@ export const JumpRopeGame: React.FC<JumpRopeGameProps> = ({
 
       renderer.render(scene, camera);
       if (isSoftwareGl) {
-        frameId = afterDraw(renderer, () => tick(performance.now()));
+        frameId = afterDraw(renderer, () => tick(performance.now()), () => unmounted);
       } else {
         frameId = requestAnimationFrame(tick);
       }
@@ -356,7 +370,7 @@ export const JumpRopeGame: React.FC<JumpRopeGameProps> = ({
       resizeObserver.disconnect();
       disposeScene(scene, renderer);
     };
-  }, [difficulty, finishGame]);
+  }, [cfg.windowMult, difficulty, finishGame]);
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -405,12 +419,11 @@ export const JumpRopeGame: React.FC<JumpRopeGameProps> = ({
       </div>
 
       {rivalTargetScore !== undefined && (
-        <div className="mt-4 flex items-center justify-between bg-orange-500/10 border border-orange-500/30 rounded-lg px-4 py-2 text-xs font-medium text-orange-200">
-          <span>Duelo contra {rivalName}</span>
-          <span className="font-mono-tabular font-bold">
-            Meta: {rivalTargetScore.toLocaleString('es-ES')} pts · Actual: {score.toLocaleString('es-ES')}
-          </span>
-        </div>
+        <DuelProgressBanner
+          rivalName={rivalName}
+          rivalTargetScore={rivalTargetScore}
+          score={score}
+        />
       )}
 
       {/* 3D Jump Rope Stage */}
@@ -420,7 +433,7 @@ export const JumpRopeGame: React.FC<JumpRopeGameProps> = ({
       >
         <div ref={mountRef} className="w-full h-full" />
         <div className="pointer-events-none absolute top-3 left-4 right-4 flex items-center justify-between text-xs">
-          <span className="bg-black/70 backdrop-blur-sm border border-white/10 text-white/80 px-2.5 py-1 rounded">
+          <span className="bg-black/80 border border-white/15 text-white/85 px-2.5 py-1 rounded">
             Ritmo: <strong className="text-white">{turboActive ? 'Turbo x1.2' : 'Constante'}</strong>
           </span>
           {turboActive && (
@@ -429,7 +442,7 @@ export const JumpRopeGame: React.FC<JumpRopeGameProps> = ({
             </span>
           )}
         </div>
-        <div className="pointer-events-none absolute bottom-3 left-1/2 -translate-x-1/2 bg-black/70 backdrop-blur-sm px-3.5 py-1 rounded-lg text-xs text-white/80 whitespace-nowrap">
+        <div className="pointer-events-none absolute bottom-3 left-1/2 -translate-x-1/2 bg-black/80 border border-white/15 px-3.5 py-1 rounded-lg text-xs text-white/85 whitespace-nowrap">
           {feedback}
         </div>
       </div>

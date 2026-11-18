@@ -5,6 +5,7 @@ import { Gender, OutfitId } from '../types/game';
 import { buildAthleteModel, AthleteRigParts } from '../three/buildAthleteModel';
 import {
   afterDraw,
+  computeResponsiveCameraZ,
   createKineticParticleTexture,
   createProceduralGymFloorTexture,
   createStudioRenderer,
@@ -18,6 +19,7 @@ import {
   athleteModelUrl,
 } from '../three/threeUtils';
 import { CharacterAvatar } from './CharacterAvatar';
+import { RotateCw, Sparkles } from 'lucide-react';
 
 export type KineticMode = 'none' | 'combo' | 'routine';
 
@@ -31,6 +33,7 @@ interface Athlete3DViewerProps {
   hasBuff?: boolean;
   pose?: 'idle' | 'flex' | 'tired';
   interactive?: boolean;
+  showPoseControls?: boolean;
   kineticMode?: KineticMode;
   kineticBurstKey?: number;
   kineticLabel?: string;
@@ -53,6 +56,114 @@ const ROUTINE_PALETTE = [
   new THREE.Color('#FBBF24'),
 ];
 
+const OUTFIT_ACCENT: Record<OutfitId, { primary: number; accent: number; metalness: number }> = {
+  basic: { primary: 0x2b2b30, accent: 0xff5a1f, metalness: 0.2 },
+  runner: { primary: 0x0284c7, accent: 0x38bdf8, metalness: 0.35 },
+  pro: { primary: 0x059669, accent: 0x34d399, metalness: 0.42 },
+  titan: { primary: 0xff5a1f, accent: 0xfbbf24, metalness: 0.85 },
+};
+
+interface GlbRigBindings {
+  hips?: THREE.Object3D;
+  spine?: THREE.Object3D;
+  spine01?: THREE.Object3D;
+  spine02?: THREE.Object3D;
+  head?: THREE.Object3D;
+  leftArm?: THREE.Object3D;
+  rightArm?: THREE.Object3D;
+  leftForeArm?: THREE.Object3D;
+  rightForeArm?: THREE.Object3D;
+  leftHand?: THREE.Object3D;
+  rightHand?: THREE.Object3D;
+}
+
+interface GlbAccessories {
+  group: THREE.Group;
+  leftWrist: THREE.Mesh;
+  rightWrist: THREE.Mesh;
+  headband: THREE.Mesh;
+  belt: THREE.Mesh;
+  mat: THREE.MeshStandardMaterial;
+}
+
+function applyWorldAxisRotationOffset(
+  bone: THREE.Object3D | undefined,
+  axis: THREE.Vector3,
+  angle: number,
+  tmpParentQ: THREE.Quaternion,
+  tmpDeltaWorldQ: THREE.Quaternion,
+  tmpLocalDeltaQ: THREE.Quaternion
+) {
+  if (!bone || !bone.parent || Math.abs(angle) < 0.0005) return;
+  bone.parent.updateMatrixWorld(true);
+  bone.parent.getWorldQuaternion(tmpParentQ);
+  tmpDeltaWorldQ.setFromAxisAngle(axis, angle);
+  tmpLocalDeltaQ
+    .copy(tmpParentQ)
+    .invert()
+    .multiply(tmpDeltaWorldQ)
+    .multiply(tmpParentQ);
+  bone.quaternion.premultiply(tmpLocalDeltaQ);
+}
+
+function createGlbAccessories(): GlbAccessories {
+  const group = new THREE.Group();
+  const mat = new THREE.MeshStandardMaterial({
+    color: 0xff5a1f,
+    emissive: 0xff5a1f,
+    emissiveIntensity: 0.25,
+    roughness: 0.28,
+    metalness: 0.65,
+  });
+
+  const wristGeo = new THREE.TorusGeometry(0.044, 0.012, 10, 24);
+  const leftWrist = new THREE.Mesh(wristGeo, mat);
+  const rightWrist = new THREE.Mesh(wristGeo, mat);
+
+  const headbandGeo = new THREE.TorusGeometry(0.108, 0.013, 10, 28);
+  const headband = new THREE.Mesh(headbandGeo, mat);
+
+  const beltGeo = new THREE.TorusGeometry(0.175, 0.014, 10, 32);
+  const belt = new THREE.Mesh(beltGeo, mat);
+
+  group.add(leftWrist, rightWrist, headband, belt);
+  return { group, leftWrist, rightWrist, headband, belt, mat };
+}
+
+function computeRealisticScale(fitnessScore: number): { sx: number; sy: number; sz: number } {
+  // Smooth continuous proportion shift between start (14..49) and elite (50..100)
+  if (fitnessScore < 50) {
+    const t = THREE.MathUtils.clamp((fitnessScore - 14) / 36, 0, 1);
+    return {
+      sx: 1.04 - t * 0.05,
+      sy: 0.99 + t * 0.02,
+      sz: 1.07 - t * 0.08,
+    };
+  }
+  const t = THREE.MathUtils.clamp((fitnessScore - 50) / 50, 0, 1);
+  return {
+    sx: 0.98 + t * 0.05,
+    sy: 1.0 + t * 0.02,
+    sz: 0.98 + t * 0.02,
+  };
+}
+
+function applyAiMaterialState(root: THREE.Object3D, outfit: OutfitId, hasBuff: boolean) {
+  const outfitCfg = OUTFIT_ACCENT[outfit] || OUTFIT_ACCENT.basic;
+  root.traverse((obj) => {
+    const m = obj as THREE.Mesh;
+    if (!m.isMesh || !m.material) return;
+    const mats = Array.isArray(m.material) ? m.material : [m.material];
+    for (const mat of mats) {
+      if (mat instanceof THREE.MeshStandardMaterial) {
+        mat.emissive.setHex(hasBuff || outfit === 'titan' ? outfitCfg.accent : 0x000000);
+        mat.emissiveIntensity = hasBuff ? 0.12 : outfit === 'titan' ? 0.06 : 0;
+        mat.needsUpdate = true;
+      }
+    }
+  });
+}
+
 export const Athlete3DViewer: React.FC<Athlete3DViewerProps> = ({
   gender,
   fitnessScore,
@@ -63,6 +174,7 @@ export const Athlete3DViewer: React.FC<Athlete3DViewerProps> = ({
   hasBuff = false,
   pose = 'idle',
   interactive = true,
+  showPoseControls = true,
   kineticMode = 'none',
   kineticBurstKey = 0,
   kineticLabel,
@@ -71,15 +183,24 @@ export const Athlete3DViewer: React.FC<Athlete3DViewerProps> = ({
 }) => {
   const mountRef = useRef<HTMLDivElement | null>(null);
   const [webglFailed, setWebglFailed] = useState(false);
+  const [manualFlex, setManualFlex] = useState(false);
+  const [autoRotate, setAutoRotate] = useState(false);
+
+  const effectivePose: 'idle' | 'flex' | 'tired' = manualFlex ? 'flex' : pose;
 
   const rigRef = useRef<AthleteRigParts | null>(null);
   const aiRootRef = useRef<THREE.Group | null>(null);
   const aiMixerRef = useRef<THREE.AnimationMixer | null>(null);
+  const aiBonesRef = useRef<GlbRigBindings>({});
+  const aiAccRef = useRef<GlbAccessories | null>(null);
   const unmountedFlag = useRef(false);
   const aiModelRef = useRef(aiModel);
   const [aiLoading, setAiLoading] = useState(false);
   aiModelRef.current = aiModel;
   const sceneRef = useRef<THREE.Scene | null>(null);
+  const controlsRef = useRef<OrbitControls | null>(null);
+  const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
+
   const propsRef = useRef({
     gender,
     fitnessScore,
@@ -88,9 +209,10 @@ export const Athlete3DViewer: React.FC<Athlete3DViewerProps> = ({
     outfit,
     energy,
     hasBuff,
-    pose,
+    pose: effectivePose,
     kineticMode,
     kineticBurstKey,
+    autoRotate,
   });
   propsRef.current = {
     gender,
@@ -100,9 +222,10 @@ export const Athlete3DViewer: React.FC<Athlete3DViewerProps> = ({
     outfit,
     energy,
     hasBuff,
-    pose,
+    pose: effectivePose,
     kineticMode,
     kineticBurstKey,
+    autoRotate,
   };
 
   // Mount Three.js scene once
@@ -132,6 +255,7 @@ export const Athlete3DViewer: React.FC<Athlete3DViewerProps> = ({
     const height = Math.max(1, container.clientHeight);
     const camera = new THREE.PerspectiveCamera(36, width / height, 0.1, 40);
     camera.position.set(0.35, 1.45, 3.25);
+    cameraRef.current = camera;
 
     const controls = new OrbitControls(camera, renderer.domElement);
     controls.target.set(0, 1.0, 0);
@@ -144,10 +268,17 @@ export const Athlete3DViewer: React.FC<Athlete3DViewerProps> = ({
     controls.maxPolarAngle = Math.PI * 0.52;
     controls.enableDamping = !isSoftwareGl;
     controls.dampingFactor = 0.06;
-    controls.autoRotate = false;
+    controls.autoRotate = propsRef.current.autoRotate;
+    controls.autoRotateSpeed = 1.8;
     controls.update();
+    controlsRef.current = controls;
 
     createThreePointLights(scene, 4);
+
+    // Subtle upward podium accent light synced to outfit / kinetic energy
+    const podiumLight = new THREE.PointLight(0xff5a1f, 0.45, 3.8, 1.6);
+    podiumLight.position.set(0, 0.22, 0.65);
+    scene.add(podiumLight);
 
     // Gym Floor & Brushed Steel Podium
     const floorTex = createProceduralGymFloorTexture(renderer);
@@ -170,10 +301,23 @@ export const Athlete3DViewer: React.FC<Athlete3DViewerProps> = ({
     podiumBase.receiveShadow = true;
     scene.add(podiumBase);
 
+    const podiumInnerDisc = new THREE.Mesh(
+      new THREE.RingGeometry(0.58, 0.78, 48),
+      new THREE.MeshBasicMaterial({
+        color: 0xff5a1f,
+        transparent: true,
+        opacity: 0.14,
+        side: THREE.DoubleSide,
+      })
+    );
+    podiumInnerDisc.rotation.x = -Math.PI / 2;
+    podiumInnerDisc.position.y = 0.002;
+    scene.add(podiumInnerDisc);
+
     const podiumRimMat = new THREE.MeshStandardMaterial({
       color: 0xff5a1f,
       emissive: 0xff5a1f,
-      emissiveIntensity: 0,
+      emissiveIntensity: 0.25,
       roughness: 0.28,
       metalness: 0.85,
     });
@@ -218,7 +362,10 @@ export const Athlete3DViewer: React.FC<Athlete3DViewerProps> = ({
     // Magnific bench replaces the procedural dumbbell rack once loaded
     loadGlbAsset(MODEL_URLS.bench, 1.0)
       .then(({ root }) => {
-        if (unmountedFlag.current) return;
+        if (unmountedFlag.current || unmounted) {
+          disposeObject3D(root);
+          return;
+        }
         root.position.set(-1.7, -0.1, -2.4);
         root.rotation.y = 0.5;
         scene.add(root);
@@ -227,12 +374,21 @@ export const Athlete3DViewer: React.FC<Athlete3DViewerProps> = ({
       .catch(() => {});
     loadGlbAsset(MODEL_URLS.dumbbells, 0.85)
       .then(({ root }) => {
-        if (unmountedFlag.current) return;
+        if (unmountedFlag.current || unmounted) {
+          disposeObject3D(root);
+          return;
+        }
         root.position.set(1.55, -0.1, -2.0);
         root.rotation.y = -0.6;
         scene.add(root);
       })
       .catch(() => {});
+
+    // Accessories overlay for GLB athlete (wristbands, headband, belt)
+    const glbAccessories = createGlbAccessories();
+    glbAccessories.group.visible = false;
+    scene.add(glbAccessories.group);
+    aiAccRef.current = glbAccessories;
 
     // Kinetic Energy Particle System (THREE.Points with pre-allocated typed arrays)
     const particleCount = KINETIC_PARTICLE_COUNT;
@@ -301,9 +457,10 @@ export const Athlete3DViewer: React.FC<Athlete3DViewerProps> = ({
     kineticPoints.frustumCulled = false;
     scene.add(kineticPoints);
 
-    // Build initial athlete
+    // Build initial procedural athlete
     const initialRig = buildAthleteModel(propsRef.current);
     rigRef.current = initialRig;
+    initialRig.root.visible = !aiModelRef.current;
     scene.add(initialRig.root);
 
     if (!isSoftwareGl) {
@@ -320,7 +477,9 @@ export const Athlete3DViewer: React.FC<Athlete3DViewerProps> = ({
       if (!container) return;
       const w = Math.max(1, container.clientWidth);
       const h = Math.max(1, container.clientHeight);
-      camera.aspect = w / h;
+      const aspect = w / h;
+      camera.aspect = aspect;
+      camera.position.z = computeResponsiveCameraZ(3.25, aspect, 0.9);
       camera.updateProjectionMatrix();
       renderer.setSize(w, h);
     });
@@ -334,15 +493,36 @@ export const Athlete3DViewer: React.FC<Athlete3DViewerProps> = ({
     let lastBurstKey = propsRef.current.kineticBurstKey;
     let kineticAlpha = lastMode !== 'none' ? 0.92 : 0;
     let burstImpulse = lastMode !== 'none' ? 0.85 : 0;
+    let flexBlend = propsRef.current.pose === 'flex' ? 1 : 0;
+    let tiredBlend = propsRef.current.pose === 'tired' ? 1 : 0;
+
+    // Reusable math temporaries (zero per-frame GC allocation)
+    const axisX = new THREE.Vector3(1, 0, 0);
+    const axisY = new THREE.Vector3(0, 1, 0);
+    const axisZ = new THREE.Vector3(0, 0, 1);
+    const tmpParentQ = new THREE.Quaternion();
+    const tmpDeltaWorldQ = new THREE.Quaternion();
+    const tmpLocalDeltaQ = new THREE.Quaternion();
+    const tmpPos = new THREE.Vector3();
+    const tmpQuat = new THREE.Quaternion();
+    const tmpUp = new THREE.Vector3();
+    const rotAlignX = new THREE.Quaternion().setFromAxisAngle(axisX, Math.PI / 2);
 
     const tick = () => {
       if (unmounted) return;
       const dt = Math.min(0.05, Math.max(0.001, clock.getDelta()));
       elapsed += dt;
       aiMixerRef.current?.update(dt);
+
       const rig = rigRef.current;
       const cur = propsRef.current;
       const isTired = cur.pose === 'tired' || cur.energy < 25;
+      const isFlex = cur.pose === 'flex' && !isTired;
+
+      flexBlend = THREE.MathUtils.damp(flexBlend, isFlex ? 1 : 0, 7.5, dt);
+      tiredBlend = THREE.MathUtils.damp(tiredBlend, isTired ? 1 : 0, 6.0, dt);
+
+      controls.autoRotate = cur.autoRotate;
 
       // Sync kinetic mode / burst trigger without recreating scene
       if (cur.kineticMode !== lastMode) {
@@ -363,31 +543,130 @@ export const Athlete3DViewer: React.FC<Athlete3DViewerProps> = ({
       kineticAlpha = THREE.MathUtils.damp(kineticAlpha, targetAlpha, 4.5, dt);
       burstImpulse = THREE.MathUtils.damp(burstImpulse, 0, 2.6, dt);
 
-      if (rig) {
+      // Animate procedural classic rig
+      if (rig && rig.root.visible) {
         const freq = isTired ? 3.2 : 1.95;
         const amp = isTired ? 0.025 : 0.014;
         const breath = Math.sin(elapsed * freq);
 
-        // Breathing & subtle idle sway
         rig.upperBody.position.y = 1.02 + breath * amp;
         rig.upperBody.scale.set(1 + breath * 0.012, 1 + breath * 0.018, 1 + breath * 0.018);
         rig.upperBody.rotation.z = Math.sin(elapsed * 0.95) * 0.022;
         rig.upperBody.rotation.x = (isTired ? 0.14 : 0.02) + breath * 0.015;
 
-        // Subtle head micro-bob & ponytail sway
+        // Smooth arm pose transitions for Classic rig
+        const flexTargetArmZ = 1.22;
+        const baseArmZ = isTired ? 0.18 : 0.2;
+        const targetLeftArmZ = THREE.MathUtils.lerp(-baseArmZ, -flexTargetArmZ, flexBlend);
+        const targetRightArmZ = THREE.MathUtils.lerp(baseArmZ, flexTargetArmZ, flexBlend);
+        rig.leftArmPivot.rotation.z = targetLeftArmZ;
+        rig.rightArmPivot.rotation.z = targetRightArmZ;
+        rig.leftForearmPivot.rotation.z = THREE.MathUtils.lerp(0, -1.65, flexBlend);
+        rig.rightForearmPivot.rotation.z = THREE.MathUtils.lerp(0, 1.65, flexBlend);
+        rig.leftForearmPivot.rotation.x = THREE.MathUtils.lerp(-0.22, 0, flexBlend);
+        rig.rightForearmPivot.rotation.x = THREE.MathUtils.lerp(-0.22, 0, flexBlend);
+
         rig.headGroup.rotation.y = Math.sin(elapsed * 0.7) * 0.08;
-        rig.headGroup.rotation.x = Math.cos(elapsed * freq) * 0.025;
+        rig.headGroup.rotation.x = Math.cos(elapsed * freq) * 0.025 + tiredBlend * 0.12 - flexBlend * 0.06;
         if (rig.ponytailGroup) {
           rig.ponytailGroup.rotation.z = Math.sin(elapsed * 1.9) * 0.06;
         }
 
-        // Buff ring slow spin
         if (rig.buffRing.visible) {
           rig.buffRing.rotation.z = elapsed * 0.9;
         }
       }
 
-      // Update kinetic particle vortex around athlete
+      // Animate & customize Realistic GLB rig
+      const aiRoot = aiRootRef.current;
+      const bones = aiBonesRef.current;
+      if (aiRoot && aiModelRef.current) {
+        const scaleTarget = computeRealisticScale(cur.fitnessScore);
+        aiRoot.scale.x = THREE.MathUtils.damp(aiRoot.scale.x, scaleTarget.sx, 5, dt);
+        aiRoot.scale.y = THREE.MathUtils.damp(aiRoot.scale.y, scaleTarget.sy, 5, dt);
+        aiRoot.scale.z = THREE.MathUtils.damp(aiRoot.scale.z, scaleTarget.sz, 5, dt);
+
+        // Apply world-space expressive pose overlays on top of GLB idle clip
+        if (flexBlend > 0.01) {
+          const chestLift = -0.08 * flexBlend;
+          applyWorldAxisRotationOffset(bones.spine01, axisX, chestLift, tmpParentQ, tmpDeltaWorldQ, tmpLocalDeltaQ);
+          applyWorldAxisRotationOffset(bones.head, axisX, -0.06 * flexBlend, tmpParentQ, tmpDeltaWorldQ, tmpLocalDeltaQ);
+          applyWorldAxisRotationOffset(bones.leftArm, axisZ, 1.32 * flexBlend, tmpParentQ, tmpDeltaWorldQ, tmpLocalDeltaQ);
+          applyWorldAxisRotationOffset(bones.rightArm, axisZ, -1.32 * flexBlend, tmpParentQ, tmpDeltaWorldQ, tmpLocalDeltaQ);
+          applyWorldAxisRotationOffset(bones.leftArm, axisY, 0.18 * flexBlend, tmpParentQ, tmpDeltaWorldQ, tmpLocalDeltaQ);
+          applyWorldAxisRotationOffset(bones.rightArm, axisY, -0.18 * flexBlend, tmpParentQ, tmpDeltaWorldQ, tmpLocalDeltaQ);
+          applyWorldAxisRotationOffset(bones.leftForeArm, axisZ, 1.55 * flexBlend, tmpParentQ, tmpDeltaWorldQ, tmpLocalDeltaQ);
+          applyWorldAxisRotationOffset(bones.rightForeArm, axisZ, -1.55 * flexBlend, tmpParentQ, tmpDeltaWorldQ, tmpLocalDeltaQ);
+        }
+
+        if (tiredBlend > 0.01) {
+          const pant = Math.sin(elapsed * 3.4) * 0.025 * tiredBlend;
+          applyWorldAxisRotationOffset(bones.spine, axisX, 0.12 * tiredBlend + pant, tmpParentQ, tmpDeltaWorldQ, tmpLocalDeltaQ);
+          applyWorldAxisRotationOffset(bones.spine01, axisX, 0.12 * tiredBlend, tmpParentQ, tmpDeltaWorldQ, tmpLocalDeltaQ);
+          applyWorldAxisRotationOffset(bones.head, axisX, 0.18 * tiredBlend, tmpParentQ, tmpDeltaWorldQ, tmpLocalDeltaQ);
+        }
+
+        // Sync 3D athletic accessories to live skeleton bones
+        aiRoot.updateMatrixWorld(true);
+        const acc = aiAccRef.current;
+        if (acc) {
+          const outfitCfg = OUTFIT_ACCENT[cur.outfit] || OUTFIT_ACCENT.basic;
+          acc.group.visible = true;
+          acc.mat.color.setHex(outfitCfg.accent);
+          acc.mat.emissive.setHex(outfitCfg.accent);
+          acc.mat.metalness = outfitCfg.metalness;
+          acc.mat.emissiveIntensity = cur.hasBuff ? 0.55 + Math.sin(elapsed * 4) * 0.25 : 0.25;
+
+          const placeRingOnBone = (
+            mesh: THREE.Mesh,
+            boneA: THREE.Object3D | undefined,
+            boneB: THREE.Object3D | undefined,
+            lerpT: number,
+            show: boolean
+          ) => {
+            mesh.visible = show && Boolean(boneA);
+            if (!mesh.visible || !boneA) return;
+            boneA.getWorldPosition(tmpPos);
+            if (boneB) {
+              boneB.getWorldPosition(tmpUp);
+              tmpPos.lerp(tmpUp, lerpT);
+            }
+            boneA.getWorldQuaternion(tmpQuat);
+            mesh.position.copy(tmpPos);
+            mesh.quaternion.copy(tmpQuat).multiply(rotAlignX);
+          };
+
+          placeRingOnBone(acc.leftWrist, bones.leftForeArm, bones.leftHand, 0.82, true);
+          placeRingOnBone(acc.rightWrist, bones.rightForeArm, bones.rightHand, 0.82, true);
+
+          // Headband aligned upright on Head bone
+          acc.headband.visible = cur.fitnessScore >= 35 && Boolean(bones.head);
+          if (acc.headband.visible && bones.head) {
+            bones.head.getWorldPosition(tmpPos);
+            bones.head.getWorldQuaternion(tmpQuat);
+            tmpUp.set(0, 0.068, 0.008).applyQuaternion(tmpQuat);
+            acc.headband.position.copy(tmpPos).add(tmpUp);
+            acc.headband.quaternion.copy(tmpQuat).multiply(rotAlignX);
+            acc.headband.scale.set(0.95, 1.08, 1);
+          }
+
+          // Athletic waist belt for upgraded outfits
+          acc.belt.visible = cur.outfit !== 'basic' && Boolean(bones.hips);
+          if (acc.belt.visible && bones.hips) {
+            bones.hips.getWorldPosition(tmpPos);
+            bones.hips.getWorldQuaternion(tmpQuat);
+            tmpUp.set(0, 0.045, 0).applyQuaternion(tmpQuat);
+            acc.belt.position.copy(tmpPos).add(tmpUp);
+            acc.belt.quaternion.copy(tmpQuat).multiply(rotAlignX);
+            acc.belt.scale.set(1.06, 0.82, 1);
+          }
+        }
+      } else if (aiAccRef.current) {
+        aiAccRef.current.group.visible = false;
+      }
+
+      // Sync podium rim & floor light with outfit or active kinetic energy
+      const outfitAccentHex = (OUTFIT_ACCENT[cur.outfit] || OUTFIT_ACCENT.basic).accent;
       if (kineticAlpha > 0.01) {
         kineticPoints.visible = true;
         const speedMult = (cur.kineticMode === 'combo' ? 1.45 : 1.1) + burstImpulse * 1.65;
@@ -395,9 +674,15 @@ export const Athlete3DViewer: React.FC<Athlete3DViewerProps> = ({
         particleMat.opacity = kineticAlpha;
         particleMat.size = 0.13 + burstImpulse * 0.07;
 
-        podiumRimMat.emissive.setHex(cur.kineticMode === 'routine' ? 0x10b981 : 0xff6a2b);
+        const kineticHex = cur.kineticMode === 'routine' ? 0x10b981 : 0xff6a2b;
+        podiumRimMat.color.setHex(kineticHex);
+        podiumRimMat.emissive.setHex(kineticHex);
         podiumRimMat.emissiveIntensity =
-          kineticAlpha * (0.45 + 0.25 * Math.sin(elapsed * 5.2) + burstImpulse * 0.8);
+          kineticAlpha * (0.55 + 0.25 * Math.sin(elapsed * 5.2) + burstImpulse * 0.8);
+        podiumInnerDisc.material.color.setHex(kineticHex);
+        podiumInnerDisc.material.opacity = 0.18 + burstImpulse * 0.14;
+        podiumLight.color.setHex(kineticHex);
+        podiumLight.intensity = 0.75 + burstImpulse * 0.9;
 
         for (let i = 0; i < particleCount; i++) {
           pAngles[i] += pAngSpeeds[i] * speedMult * dt;
@@ -413,7 +698,6 @@ export const Athlete3DViewer: React.FC<Athlete3DViewerProps> = ({
           posArr[idx + 1] = pHeights[i];
           posArr[idx + 2] = Math.sin(pAngles[i]) * r;
 
-          // Fade near bottom/top edges & add crisp kinetic shimmer
           const edgeFade = Math.min(1, pHeights[i] * 3.2) * Math.min(1, (2.25 - pHeights[i]) * 2.4);
           const shimmer = 0.72 + 0.28 * Math.sin(elapsed * 7.5 + pPhases[i]);
           const brightness = edgeFade * shimmer;
@@ -425,14 +709,20 @@ export const Athlete3DViewer: React.FC<Athlete3DViewerProps> = ({
         colorAttr.needsUpdate = true;
       } else {
         kineticPoints.visible = false;
-        podiumRimMat.emissiveIntensity = 0;
+        podiumRimMat.color.setHex(outfitAccentHex);
+        podiumRimMat.emissive.setHex(outfitAccentHex);
+        podiumRimMat.emissiveIntensity = cur.hasBuff ? 0.55 + Math.sin(elapsed * 3.5) * 0.2 : 0.22;
+        podiumInnerDisc.material.color.setHex(outfitAccentHex);
+        podiumInnerDisc.material.opacity = cur.hasBuff ? 0.2 : 0.1;
+        podiumLight.color.setHex(outfitAccentHex);
+        podiumLight.intensity = cur.hasBuff ? 0.7 : 0.35;
       }
 
       controls.update();
       renderer.render(scene, camera);
 
       if (isSoftwareGl) {
-        frameId = afterDraw(renderer, tick);
+        frameId = afterDraw(renderer, tick, () => unmounted);
       } else {
         frameId = requestAnimationFrame(tick);
       }
@@ -447,6 +737,10 @@ export const Athlete3DViewer: React.FC<Athlete3DViewerProps> = ({
       unmountedFlag.current = true;
       aiRootRef.current = null;
       aiMixerRef.current = null;
+      aiBonesRef.current = {};
+      aiAccRef.current = null;
+      controlsRef.current = null;
+      cameraRef.current = null;
       cancelAnimationFrame(frameId);
       clearTimeout(frameId);
       resizeObserver.disconnect();
@@ -456,7 +750,8 @@ export const Athlete3DViewer: React.FC<Athlete3DViewerProps> = ({
     };
   }, [interactive]);
 
-  // Rebuild athlete geometry smoothly when physique or outfit props change
+  // Rebuild classic procedural athlete only when physique, skin/hair, outfit, buff, or low-energy threshold changes
+  const isLowEnergy = energy < 25;
   useEffect(() => {
     const scene = sceneRef.current;
     if (!scene) return;
@@ -473,12 +768,12 @@ export const Athlete3DViewer: React.FC<Athlete3DViewerProps> = ({
       hairColor,
       outfit,
       hasBuff,
-      pose: pose === 'tired' || energy < 25 ? 'tired' : pose,
+      pose: propsRef.current.pose === 'tired' || isLowEnergy ? 'tired' : propsRef.current.pose,
     });
     rigRef.current = nextRig;
     nextRig.root.visible = !aiModelRef.current;
     scene.add(nextRig.root);
-  }, [gender, fitnessScore, skinTone, hairColor, outfit, hasBuff, pose, energy]);
+  }, [gender, fitnessScore, skinTone, hairColor, outfit, hasBuff, isLowEnergy]);
 
   // Magnific AI athlete: rigged GLB chosen by gender + physique stage
   const aiUrl = athleteModelUrl(gender, fitnessScore);
@@ -486,25 +781,79 @@ export const Athlete3DViewer: React.FC<Athlete3DViewerProps> = ({
     const scene = sceneRef.current;
     if (!scene) return;
     if (rigRef.current) rigRef.current.root.visible = !aiModel;
+
     const clearAi = () => {
       if (aiRootRef.current) {
         scene.remove(aiRootRef.current);
+        disposeObject3D(aiRootRef.current);
         aiRootRef.current = null;
       }
       aiMixerRef.current = null;
+      aiBonesRef.current = {};
     };
+
     if (!aiModel) {
       clearAi();
       return;
     }
+
     let cancelled = false;
     if (!aiRootRef.current) setAiLoading(true);
-    loadGlbAsset(aiUrl, gender === 'female' ? 1.68 : 1.8)
+
+    loadGlbAsset(aiUrl, gender === 'female' ? 1.68 : 1.8, { cloneMaterials: true })
       .then(({ root, animations }) => {
-        if (cancelled || unmountedFlag.current || sceneRef.current !== scene) return;
+        if (cancelled || unmountedFlag.current || sceneRef.current !== scene) {
+          disposeObject3D(root);
+          return;
+        }
         setAiLoading(false);
         clearAi();
         root.position.y = -0.05;
+        const initScale = computeRealisticScale(fitnessScore);
+        root.scale.set(initScale.sx, initScale.sy, initScale.sz);
+
+        // Bind skeleton bones for real-time poses and accessories
+        const bones: GlbRigBindings = {};
+        root.traverse((obj) => {
+          switch (obj.name) {
+            case 'Hips':
+              bones.hips = obj;
+              break;
+            case 'Spine':
+              bones.spine = obj;
+              break;
+            case 'Spine01':
+              bones.spine01 = obj;
+              break;
+            case 'Spine02':
+              bones.spine02 = obj;
+              break;
+            case 'Head':
+              bones.head = obj;
+              break;
+            case 'LeftArm':
+              bones.leftArm = obj;
+              break;
+            case 'RightArm':
+              bones.rightArm = obj;
+              break;
+            case 'LeftForeArm':
+              bones.leftForeArm = obj;
+              break;
+            case 'RightForeArm':
+              bones.rightForeArm = obj;
+              break;
+            case 'LeftHand':
+              bones.leftHand = obj;
+              break;
+            case 'RightHand':
+              bones.rightHand = obj;
+              break;
+          }
+        });
+        aiBonesRef.current = bones;
+
+        applyAiMaterialState(root, propsRef.current.outfit, propsRef.current.hasBuff);
         scene.add(root);
         aiRootRef.current = root;
         if (rigRef.current) rigRef.current.root.visible = false;
@@ -524,6 +873,20 @@ export const Athlete3DViewer: React.FC<Athlete3DViewerProps> = ({
     };
   }, [aiModel, aiUrl, gender]);
 
+  // Apply subtle outfit sheen / buff highlight onto cloned GLB material
+  useEffect(() => {
+    const aiRoot = aiRootRef.current;
+    if (!aiRoot) return;
+    applyAiMaterialState(aiRoot, outfit, hasBuff);
+  }, [outfit, hasBuff, aiModel, aiUrl]);
+
+  const handleResetCamera = () => {
+    if (!cameraRef.current || !controlsRef.current) return;
+    cameraRef.current.position.set(0.35, 1.45, 3.25);
+    controlsRef.current.target.set(0, 1.0, 0);
+    controlsRef.current.update();
+  };
+
   if (webglFailed) {
     return (
       <div className={`flex items-center justify-center bg-black rounded-xl ${className}`}>
@@ -535,7 +898,7 @@ export const Athlete3DViewer: React.FC<Athlete3DViewerProps> = ({
           outfit={outfit}
           energy={energy}
           hasBuff={hasBuff}
-          pose={pose}
+          pose={effectivePose}
           className="w-40 h-52"
         />
       </div>
@@ -543,17 +906,22 @@ export const Athlete3DViewer: React.FC<Athlete3DViewerProps> = ({
   }
 
   return (
-    <div className={`relative rounded-xl overflow-hidden bg-black ${className}`}>
+    <div
+      onDoubleClick={interactive ? handleResetCamera : undefined}
+      className={`relative rounded-xl overflow-hidden bg-black ${className}`}
+    >
       <div ref={mountRef} className="w-full h-full" />
       {aiModel && aiLoading && (
         <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-3">
           <span className="w-9 h-9 rounded-full border-[3px] border-white/15 border-t-orange-500 animate-spin" />
-          <span className="font-display uppercase tracking-[0.18em] font-bold text-xs text-white/60">Cargando atleta…</span>
+          <span className="font-display uppercase tracking-[0.18em] font-bold text-xs text-white/60">
+            Cargando atleta…
+          </span>
         </div>
       )}
       {kineticMode !== 'none' && (
         <span
-          className={`pointer-events-none absolute top-2.5 left-3 text-[11px] font-bold tracking-tight ${
+          className={`pointer-events-none absolute top-3 right-3 text-[11px] font-bold tracking-tight bg-black/80 px-2.5 py-1 rounded-lg border border-white/15 ${
             kineticMode === 'routine' ? 'text-emerald-300' : 'text-amber-300'
           }`}
         >
@@ -563,9 +931,38 @@ export const Athlete3DViewer: React.FC<Athlete3DViewerProps> = ({
               : 'Energía Cinética · Combo Alto')}
         </span>
       )}
+      {interactive && showPoseControls && (
+        <div className="absolute bottom-2.5 left-2.5 z-10 flex items-center gap-1.5">
+          <button
+            type="button"
+            onClick={() => setManualFlex((v) => !v)}
+            className={`px-2.5 py-1 rounded-lg text-[11px] font-display uppercase tracking-wider font-bold border transition-colors cursor-pointer flex items-center gap-1 ${
+              manualFlex
+                ? 'bg-orange-500 text-white border-orange-400'
+                : 'bg-black/80 text-white/80 border-white/15 hover:text-white'
+            }`}
+          >
+            <Sparkles className="w-3 h-3" />
+            {manualFlex ? 'Pose Flex' : 'Flex'}
+          </button>
+          <button
+            type="button"
+            onClick={() => setAutoRotate((v) => !v)}
+            title="Activar rotación automática 360°"
+            className={`px-2.5 py-1 rounded-lg text-[11px] font-display uppercase tracking-wider font-bold border transition-colors cursor-pointer flex items-center gap-1 ${
+              autoRotate
+                ? 'bg-white text-black border-white'
+                : 'bg-black/80 text-white/80 border-white/15 hover:text-white'
+            }`}
+          >
+            <RotateCw className={`w-3 h-3 ${autoRotate ? 'animate-spin' : ''}`} />
+            360°
+          </button>
+        </div>
+      )}
       {interactive && (
-        <span className="pointer-events-none absolute bottom-2 right-2.5 text-[10px] font-medium text-white/50 bg-slate-950/70 px-2 py-0.5 rounded">
-          Arrastra para rotar 360°
+        <span className="pointer-events-none absolute bottom-2.5 right-2.5 text-[10px] font-medium text-white/55 bg-black/75 px-2 py-0.5 rounded border border-white/10">
+          Arrastra · Doble clic centra
         </span>
       )}
     </div>

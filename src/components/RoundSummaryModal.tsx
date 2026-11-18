@@ -22,6 +22,8 @@ export interface SummaryData {
   newLevel: number;
   duelWon?: boolean;
   rivalName?: string;
+  isNewRecord?: boolean;
+  previousBestScore?: number;
   hasNextRoutineStep?: boolean;
   routineCompletedBonus?: {
     title: string;
@@ -110,6 +112,14 @@ export const RoundSummaryModal: React.FC<RoundSummaryModalProps> = ({
           <div className="text-6xl font-display italic font-black leading-none font-extrabold font-mono-tabular text-orange-500 mt-2">
             {summary.score.toLocaleString('es-ES')}<span className="text-2xl text-white/50 ml-1 not-italic">pts</span>
           </div>
+          {summary.isNewRecord && (
+            <div className="mt-2.5 inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-500/20 border border-amber-400/45 text-[11px] font-bold uppercase tracking-wider text-amber-300">
+              <Trophy className="w-3.5 h-3.5 text-amber-400" />
+              {summary.previousBestScore && summary.previousBestScore > 0
+                ? `¡Nuevo Récord Personal! (Anterior: ${summary.previousBestScore.toLocaleString('es-ES')})`
+                : '¡Primera Marca Registrada!'}
+            </div>
+          )}
         </div>
 
         {hasNewAchievement && (

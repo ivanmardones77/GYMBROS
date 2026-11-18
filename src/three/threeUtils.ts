@@ -341,20 +341,51 @@ export function createKineticParticleTexture(): THREE.CanvasTexture {
   return tex;
 }
 
-export function afterDraw(renderer: THREE.WebGLRenderer, cb: () => void): number {
+export function computeResponsiveCameraZ(baseZ: number, aspect: number, minAspect = 1.05): number {
+  if (aspect >= minAspect) return baseZ;
+  const factor = Math.min(1.48, minAspect / Math.max(0.55, aspect));
+  return baseZ * factor;
+}
+
+export function afterDraw(
+  renderer: THREE.WebGLRenderer,
+  cb: () => void,
+  isCancelled?: () => boolean
+): number {
   const gl = renderer.getContext() as WebGL2RenderingContext;
   if (!gl || typeof gl.fenceSync !== 'function') {
-    return window.setTimeout(cb, 80);
+    return window.setTimeout(() => {
+      if (!isCancelled?.()) cb();
+    }, 80);
   }
   const sync = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0);
   gl.flush();
   const poll = () => {
-    const state = sync ? gl.getSyncParameter(sync, gl.SYNC_STATUS) : gl.SIGNALED;
+    if (isCancelled?.()) {
+      try {
+        if (sync) gl.deleteSync(sync);
+      } catch {
+        // Ignore lost context errors
+      }
+      return;
+    }
+    let state: number = gl.SIGNALED;
+    try {
+      state = sync ? gl.getSyncParameter(sync, gl.SYNC_STATUS) : gl.SIGNALED;
+    } catch {
+      return;
+    }
     if (state === gl.UNSIGNALED) {
       window.setTimeout(poll, 5);
     } else {
-      if (sync) gl.deleteSync(sync);
-      window.setTimeout(cb, 80);
+      try {
+        if (sync) gl.deleteSync(sync);
+      } catch {
+        // Ignore lost context errors
+      }
+      window.setTimeout(() => {
+        if (!isCancelled?.()) cb();
+      }, 80);
     }
   };
   return window.setTimeout(poll, 5);
@@ -363,13 +394,20 @@ export function afterDraw(renderer: THREE.WebGLRenderer, cb: () => void): number
 export function disposeObject3D(root: THREE.Object3D): void {
   root.traverse((obj) => {
     if (obj instanceof THREE.Mesh || obj instanceof THREE.Points) {
-      obj.geometry?.dispose();
+      if (!obj.userData?.sharedGlbGeometry) {
+        obj.geometry?.dispose();
+      }
       const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+      const isSharedMat = Boolean(obj.userData?.sharedGlbMaterial);
+      const isClonedMat = Boolean(obj.userData?.clonedGlbMaterial);
       for (const m of mats) {
         if (!m) continue;
-        for (const val of Object.values(m)) {
-          if (val && typeof val === 'object' && 'isTexture' in val) {
-            (val as THREE.Texture).dispose();
+        if (isSharedMat && !isClonedMat) continue;
+        if (!isClonedMat) {
+          for (const val of Object.values(m)) {
+            if (val && typeof val === 'object' && 'isTexture' in val) {
+              (val as THREE.Texture).dispose();
+            }
           }
         }
         m.dispose();
@@ -426,16 +464,29 @@ const DECOR_SPEC: Record<DecorId, { url: keyof typeof MODEL_URLS; h: number }> =
 export function addGymDecor(
   scene: THREE.Scene,
   items: DecorId[],
-  opts: { focus?: { x: number; z: number }; floorY?: number; spread?: number; depth?: number } = {}
+  opts: {
+    focus?: { x: number; z: number };
+    floorY?: number;
+    spread?: number;
+    depth?: number;
+    isCancelled?: () => boolean;
+  } = {}
 ): void {
-  const { focus = { x: 0, z: 0 }, floorY = 0, spread = 2.9, depth = 2.6 } = opts;
+  const { focus = { x: 0, z: 0 }, floorY = 0, spread = 2.9, depth = 2.6, isCancelled } = opts;
   items.forEach((id, i) => {
     const side = i % 2 === 0 ? -1 : 1;
     const row = Math.floor(i / 2);
     const spec = DECOR_SPEC[id];
     loadGlbAsset(MODEL_URLS[spec.url], spec.h)
       .then(({ root }) => {
-        if (!scene.parent && scene.children.length === 0) return;
+        if (isCancelled?.()) {
+          disposeObject3D(root);
+          return;
+        }
+        if (!isCancelled && !scene.parent && scene.children.length === 0) {
+          disposeObject3D(root);
+          return;
+        }
         root.position.set(focus.x + side * (spread + row * 1.2), floorY, focus.z - depth - row * 1.1);
         root.rotation.y = -side * 0.55;
         scene.add(root);
@@ -452,7 +503,7 @@ export function addGymDecor(
 export async function loadGlbAsset(
   url: string,
   height: number,
-  opts: { anchor?: 'bottom' | 'top' } = {}
+  opts: { anchor?: 'bottom' | 'top'; cloneMaterials?: boolean } = {}
 ): Promise<{ root: THREE.Group; animations: THREE.AnimationClip[] }> {
   let p = gltfCache.get(url);
   if (!p) {
@@ -480,6 +531,14 @@ export async function loadGlbAsset(
       m.castShadow = true;
       m.receiveShadow = true;
       m.frustumCulled = false;
+      m.userData.sharedGlbGeometry = true;
+      m.userData.sharedGlbMaterial = true;
+      if (opts.cloneMaterials && m.material) {
+        m.material = Array.isArray(m.material)
+          ? m.material.map((mat) => mat.clone())
+          : m.material.clone();
+        m.userData.clonedGlbMaterial = true;
+      }
     }
   });
 

@@ -3,8 +3,10 @@ import * as THREE from 'three';
 import { DifficultyLevel, MinigameResult } from '../../types/game';
 import { DIFFICULTY_CONFIG } from '../../data/gameData';
 import { sound } from '../../utils/sound';
+import { DuelProgressBanner } from '../DuelProgressBanner';
 import {
   afterDraw,
+  computeResponsiveCameraZ,
   createProceduralGymFloorTexture,
   createStudioRenderer,
   createThreePointLights,
@@ -63,6 +65,9 @@ export const TreadmillSprintGame: React.FC<TreadmillSprintGameProps> = ({
   const isJumpingRef = useRef(false);
   const stridePhaseRef = useRef(0);
   const timeRef = useRef(DURATION_SEC);
+  const lastSecRef = useRef(DURATION_SEC);
+  const lastSpeedTenthsRef = useRef(80);
+  const lastScoreRef = useRef(0);
   const completedRef = useRef(false);
 
   const finishGame = useCallback(() => {
@@ -97,15 +102,20 @@ export const TreadmillSprintGame: React.FC<TreadmillSprintGameProps> = ({
       return;
     }
 
+    let unmounted = false;
     const scene = new THREE.Scene();
     dressGymScene(scene, { fogNear: 7, fogFar: 18, wallDistance: 12, cone: false });
-    addGymDecor(scene, ['squatRack', 'dumbbells'], { focus: { x: 0, z: 0 }, depth: 4.5 });
+    addGymDecor(scene, ['squatRack', 'dumbbells'], {
+      focus: { x: 0, z: 0 },
+      depth: 4.5,
+      isCancelled: () => unmounted,
+    });
     scene.environment = envMap;
 
     const w = Math.max(1, container.clientWidth);
     const h = Math.max(1, container.clientHeight);
     const camera = new THREE.PerspectiveCamera(46, w / h, 0.1, 40);
-    camera.position.set(1.85, 1.8, 3.6);
+    camera.position.set(1.85, 1.8, computeResponsiveCameraZ(3.6, w / h, 1.0));
     camera.lookAt(0, 0.85, -1.5);
 
     createThreePointLights(scene, 7);
@@ -183,7 +193,9 @@ export const TreadmillSprintGame: React.FC<TreadmillSprintGameProps> = ({
       if (!container) return;
       const cw = Math.max(1, container.clientWidth);
       const ch = Math.max(1, container.clientHeight);
-      camera.aspect = cw / ch;
+      const aspect = cw / ch;
+      camera.aspect = aspect;
+      camera.position.z = computeResponsiveCameraZ(3.6, aspect, 1.0);
       camera.updateProjectionMatrix();
       renderer.setSize(cw, ch);
     });
@@ -191,7 +203,6 @@ export const TreadmillSprintGame: React.FC<TreadmillSprintGameProps> = ({
 
     let last = performance.now();
     let frameId = 0;
-    let unmounted = false;
 
     const tick = (now: number) => {
       if (unmounted) return;
@@ -199,7 +210,11 @@ export const TreadmillSprintGame: React.FC<TreadmillSprintGameProps> = ({
       last = now;
 
       timeRef.current = Math.max(0, timeRef.current - dt);
-      setTimeLeft(Math.ceil(timeRef.current));
+      const nextSec = Math.ceil(timeRef.current);
+      if (nextSec !== lastSecRef.current) {
+        lastSecRef.current = nextSec;
+        setTimeLeft(nextSec);
+      }
 
       if (timeRef.current <= 0) {
         finishGame();
@@ -208,11 +223,18 @@ export const TreadmillSprintGame: React.FC<TreadmillSprintGameProps> = ({
 
       // Natural speed decay
       speedRef.current = Math.max(4.5, speedRef.current - dt * (3.1 * cfg.speedMult * 0.85));
-      setSpeed(Number(speedRef.current.toFixed(1)));
+      const tenths = Math.round(speedRef.current * 10);
+      if (tenths !== lastSpeedTenthsRef.current) {
+        lastSpeedTenthsRef.current = tenths;
+        setSpeed(tenths / 10);
+      }
 
       if (speedRef.current > 10) {
         scoreRef.current += Math.round(speedRef.current * dt * 3.5 * cfg.rewardMult);
-        setScore(scoreRef.current);
+        if (scoreRef.current !== lastScoreRef.current) {
+          lastScoreRef.current = scoreRef.current;
+          setScore(scoreRef.current);
+        }
       }
 
       // Belt & Runner Kinematics
@@ -254,10 +276,13 @@ export const TreadmillSprintGame: React.FC<TreadmillSprintGameProps> = ({
       }
       runner.shadowMesh.scale.setScalar(Math.max(0.45, 1 - jumpHeightRef.current * 0.5));
 
-      // Dynamic FOV widening with speed
+      // Dynamic FOV widening with speed (only update projection matrix on real change)
       const targetFov = 44 + (speedRef.current - 6) * 0.55;
-      camera.fov = THREE.MathUtils.damp(camera.fov, targetFov, 6, dt);
-      camera.updateProjectionMatrix();
+      const nextFov = THREE.MathUtils.damp(camera.fov, targetFov, 6, dt);
+      if (Math.abs(nextFov - camera.fov) > 0.01) {
+        camera.fov = nextFov;
+        camera.updateProjectionMatrix();
+      }
 
       // Spawn & move 3D hurdles
       nextSpawnTimer -= dt;
@@ -284,6 +309,7 @@ export const TreadmillSprintGame: React.FC<TreadmillSprintGameProps> = ({
             perfectRef.current += 1;
             const bonus = Math.round(140 * cfg.rewardMult);
             scoreRef.current += bonus;
+            lastScoreRef.current = scoreRef.current;
             setCombo(comboRef.current);
             setScore(scoreRef.current);
             setStatusMsg(`¡Salto limpio! +${bonus} pts`);
@@ -307,7 +333,7 @@ export const TreadmillSprintGame: React.FC<TreadmillSprintGameProps> = ({
 
       renderer.render(scene, camera);
       if (isSoftwareGl) {
-        frameId = afterDraw(renderer, () => tick(performance.now()));
+        frameId = afterDraw(renderer, () => tick(performance.now()), () => unmounted);
       } else {
         frameId = requestAnimationFrame(tick);
       }
@@ -337,6 +363,7 @@ export const TreadmillSprintGame: React.FC<TreadmillSprintGameProps> = ({
         maxComboRef.current = Math.max(maxComboRef.current, comboRef.current);
         const pts = Math.round((18 + comboRef.current * 1.5) * cfg.rewardMult);
         scoreRef.current += pts;
+        lastScoreRef.current = scoreRef.current;
         setCombo(comboRef.current);
         setScore(scoreRef.current);
         sound.playStep(foot === 'L');
@@ -408,20 +435,19 @@ export const TreadmillSprintGame: React.FC<TreadmillSprintGameProps> = ({
       </div>
 
       {rivalTargetScore !== undefined && (
-        <div className="mt-4 flex items-center justify-between bg-orange-500/10 border border-orange-500/30 rounded-lg px-4 py-2 text-xs font-medium text-orange-200">
-          <span>Duelo contra {rivalName}</span>
-          <span className="font-mono-tabular font-bold">
-            Meta: {rivalTargetScore.toLocaleString('es-ES')} pts · Actual: {score.toLocaleString('es-ES')}
-          </span>
-        </div>
+        <DuelProgressBanner
+          rivalName={rivalName}
+          rivalTargetScore={rivalTargetScore}
+          score={score}
+        />
       )}
 
       {/* 3D Treadmill Track Viewport */}
       <div className="mt-5 relative h-[56vh] min-h-[360px] max-h-[580px] fc-stage bg-black rounded-2xl overflow-hidden select-none">
         <div ref={mountRef} className="w-full h-full" />
-        <div className="pointer-events-none absolute top-3 left-4 right-4 flex items-center justify-between text-xs text-white/80">
-          <span className="bg-black/70 backdrop-blur-sm border border-white/10 px-2.5 py-1 rounded">{statusMsg}</span>
-          <span className="bg-black/70 backdrop-blur-sm border border-white/10 px-2.5 py-1 rounded font-mono-tabular text-amber-400 font-bold">
+        <div className="pointer-events-none absolute top-3 left-4 right-4 flex items-center justify-between text-xs text-white/85">
+          <span className="bg-black/80 border border-white/15 px-2.5 py-1 rounded">{statusMsg}</span>
+          <span className="bg-black/80 border border-white/15 px-2.5 py-1 rounded font-mono-tabular text-amber-400 font-bold">
             Combo x{combo}
           </span>
         </div>
@@ -429,8 +455,8 @@ export const TreadmillSprintGame: React.FC<TreadmillSprintGameProps> = ({
 
       <div className="mt-5 grid grid-cols-3 gap-3">
         <button
-          onClick={() => handleStride('L')}
-          className={`py-4 rounded-xl font-display uppercase tracking-wider font-bold text-base border transition-all cursor-pointer select-none ${
+          onPointerDown={() => handleStride('L')}
+          className={`py-4 rounded-xl font-display uppercase tracking-wider font-bold text-base border transition-all cursor-pointer select-none touch-none ${
             nextFoot === 'L'
               ? 'bg-orange-500 text-white border-orange-600 shadow-none scale-[1.01]'
               : 'bg-white/[0.03] text-white/75 border-white/10 hover:bg-white/10'
@@ -440,15 +466,15 @@ export const TreadmillSprintGame: React.FC<TreadmillSprintGameProps> = ({
         </button>
 
         <button
-          onClick={handleJump}
-          className="py-4 rounded-xl font-display uppercase tracking-wider font-bold text-base bg-white hover:bg-white/85 active:scale-[0.98] text-black transition-all cursor-pointer select-none"
+          onPointerDown={handleJump}
+          className="py-4 rounded-xl font-display uppercase tracking-wider font-bold text-base bg-white hover:bg-white/85 active:scale-[0.98] text-black transition-all cursor-pointer select-none touch-none"
         >
           Saltar Obstáculo (Espacio)
         </button>
 
         <button
-          onClick={() => handleStride('R')}
-          className={`py-4 rounded-xl font-display uppercase tracking-wider font-bold text-base border transition-all cursor-pointer select-none ${
+          onPointerDown={() => handleStride('R')}
+          className={`py-4 rounded-xl font-display uppercase tracking-wider font-bold text-base border transition-all cursor-pointer select-none touch-none ${
             nextFoot === 'R'
               ? 'bg-orange-500 text-white border-orange-600 shadow-none scale-[1.01]'
               : 'bg-white/[0.03] text-white/75 border-white/10 hover:bg-white/10'
