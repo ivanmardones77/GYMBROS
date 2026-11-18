@@ -372,23 +372,23 @@ export const BattleRopesGame: React.FC<BattleRopesGameProps> = ({
       <div className="flex flex-wrap items-center justify-between gap-4 pb-4 border-b border-white/10">
         <div>
           <p className="fc-kicker">Combate & HIIT 3D · {cfg.label}</p>
-          <h2 className="text-[2.6rem] text-white mt-1">Olas de Battle Ropes</h2>
+          <h2 className="text-[2rem] sm:text-[2.6rem] text-white mt-1">Olas de Battle Ropes</h2>
         </div>
 
-        <div className="flex items-center gap-7">
+        <div className="flex flex-wrap items-center gap-x-7 gap-y-2">
           <div className="text-right">
             <div className="text-[10px] uppercase tracking-[0.16em] font-semibold text-white/40">Tiempo</div>
-            <div className="font-display font-bold text-[2.1rem] leading-none tabular-nums mt-1 text-white">{timeLeft}s</div>
+            <div className="font-display font-bold text-[1.6rem] sm:text-[2.1rem] leading-none tabular-nums mt-1 text-white">{timeLeft}s</div>
           </div>
           <div className="text-right">
             <div className="text-[10px] uppercase tracking-[0.16em] font-semibold text-white/40">Combo</div>
-            <div className={`font-display font-bold text-[2.1rem] leading-none tabular-nums mt-1 ${combo >= 8 ? 'text-orange-500' : 'text-white'}`}>
+            <div className={`font-display font-bold text-[1.6rem] sm:text-[2.1rem] leading-none tabular-nums mt-1 ${combo >= 8 ? 'text-orange-500' : 'text-white'}`}>
               x{combo}
             </div>
           </div>
           <div className="text-right">
             <div className="text-[10px] uppercase tracking-[0.16em] font-semibold text-white/40">Puntos</div>
-            <div className="font-display font-bold text-[2.1rem] leading-none tabular-nums mt-1 text-emerald-400">
+            <div className="font-display font-bold text-[1.6rem] sm:text-[2.1rem] leading-none tabular-nums mt-1 text-emerald-400">
               {score.toLocaleString('es-ES')}
             </div>
           </div>

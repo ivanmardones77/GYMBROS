@@ -81,7 +81,7 @@ export function createThreePointLights(scene: THREE.Scene, shadowExtent = 6): vo
   scene.add(fill);
 
   // Signature orange rim from back-left
-  const rimWarm = new THREE.DirectionalLight(0xff6a2b, 1.6);
+  const rimWarm = new THREE.DirectionalLight(0xff6a2b, 1.15);
   rimWarm.position.set(-5, 3.5, -4.5);
   scene.add(rimWarm);
 
@@ -238,8 +238,8 @@ export function dressGymScene(scene: THREE.Scene, opts: GymSceneOptions = {}): T
     new THREE.PlaneGeometry(4.4, 4.4),
     new THREE.MeshBasicMaterial({
       map: radialTexture([
-        [0, 'rgba(255,236,220,0.22)'],
-        [0.45, 'rgba(255,200,170,0.07)'],
+        [0, 'rgba(240,240,240,0.18)'],
+        [0.45, 'rgba(230,230,230,0.06)'],
         [1, 'rgba(255,160,120,0)'],
       ]),
       transparent: true,
@@ -274,7 +274,7 @@ export function createProceduralGymFloorTexture(renderer: THREE.WebGLRenderer): 
       const y = rnd() * size;
       const r = rnd();
       ctx.fillStyle =
-        r < 0.06 ? 'rgba(255,90,31,0.35)' : r < 0.4 ? 'rgba(255,255,255,0.045)' : 'rgba(0,0,0,0.45)';
+        r < 0.03 ? 'rgba(255,90,31,0.25)' : r < 0.4 ? 'rgba(255,255,255,0.045)' : 'rgba(0,0,0,0.45)';
       const d = r < 0.06 ? 1.6 : 1.2 + rnd() * 1.4;
       ctx.fillRect(x, y, d, d);
     }
@@ -486,4 +486,14 @@ export async function loadGlbAsset(
   const root = new THREE.Group();
   root.add(model);
   return { root, animations: gltf.animations };
+}
+
+/** Warms the GLB cache in the background (parsed once, cloned later). */
+export function preloadGlbAssets(urls: string[]): void {
+  for (const url of urls) {
+    if (gltfCache.has(url)) continue;
+    const p = new GLTFLoader().loadAsync(url);
+    p.catch(() => gltfCache.delete(url));
+    gltfCache.set(url, p);
+  }
 }

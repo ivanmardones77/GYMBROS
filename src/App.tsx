@@ -43,6 +43,7 @@ import { WeeklyMultiplayerPanel } from './components/WeeklyMultiplayerPanel';
 import { DailyRewardsModal } from './components/DailyRewardsModal';
 import { NotificationCenter } from './components/NotificationCenter';
 import { GameCard } from './components/GameCard';
+import { preloadGlbAssets, MODEL_URLS } from './three/threeUtils';
 import {
   RoundSummaryModal,
   SummaryData,
@@ -103,6 +104,12 @@ export default function App() {
   const [toastPush, setToastPush] = useState<PushNotificationItem | null>(null);
   const [gymImgError, setGymImgError] = useState(false);
   const [aiAthlete, setAiAthlete] = useState(true);
+
+  // Warm the 3D model cache in the background so minigames open instantly
+  useEffect(() => {
+    const t = window.setTimeout(() => preloadGlbAssets(Object.values(MODEL_URLS)), 2500);
+    return () => window.clearTimeout(t);
+  }, []);
   const [kineticMode, setKineticMode] = useState<KineticMode>('none');
   const [kineticBurstKey, setKineticBurstKey] = useState(0);
   const [kineticLabel, setKineticLabel] = useState<string>('');
@@ -963,14 +970,14 @@ export default function App() {
 
       {/* Player HUD */}
       <div className="border-b border-white/[0.07] bg-gradient-to-r from-[#111] via-[#0d0d0d] to-[#111]">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-3 flex flex-wrap items-center justify-between gap-4">
-          <div className="flex flex-wrap items-center gap-x-7 gap-y-3">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-3 flex flex-wrap items-center justify-between gap-3 sm:gap-4">
+          <div className="flex flex-wrap items-center gap-x-4 sm:gap-x-7 gap-y-3">
             <div className="flex items-center gap-3">
               <div className="relative w-10 h-10 rounded-full bg-white text-black flex items-center justify-center font-display italic font-black text-lg">
                 {player.level}
                 <span className="absolute -bottom-1 left-1/2 -translate-x-1/2 px-1 rounded bg-orange-500 text-[8px] leading-3 not-italic font-bold text-white tracking-widest">NV</span>
               </div>
-              <div className="min-w-[140px]">
+              <div className="min-w-[110px] sm:min-w-[140px]">
                 <div className="font-display text-lg font-bold uppercase leading-none tracking-wide">{player.name}</div>
                 <div className="mt-1.5 h-1.5 w-full rounded-full bg-white/10 overflow-hidden">
                   <div className="h-full fc-progress rounded-full transition-all" style={{ width: `${xpPct}%` }} />
@@ -982,11 +989,11 @@ export default function App() {
               { icon: <span className="w-3.5 h-3.5 rounded-full bg-gradient-to-br from-amber-200 to-amber-500 inline-block" />, label: 'Monedas', value: player.coins, color: 'text-amber-400' },
               { icon: <Flame className="w-4 h-4" />, label: 'Racha', value: `${player.streakDays} días`, color: 'text-emerald-400' },
             ].map((s) => (
-              <div key={s.label} className="flex items-center gap-2.5">
-                <span className={`w-8 h-8 rounded-lg bg-white/[0.06] border border-white/[0.06] flex items-center justify-center ${s.color}`}>{s.icon}</span>
+              <div key={s.label} className={`items-center gap-2.5 ${s.label === 'Racha' ? 'hidden sm:flex' : 'flex'}`}>
+                <span className={`hidden sm:flex w-8 h-8 rounded-lg bg-white/[0.06] border border-white/[0.06] items-center justify-center ${s.color}`}>{s.icon}</span>
                 <div>
                   <div className="text-[10px] uppercase tracking-[0.16em] text-white/40 font-semibold leading-none">{s.label}</div>
-                  <div className="font-display text-xl font-bold leading-none mt-1 tabular-nums">{s.value}</div>
+                  <div className={`font-display text-lg sm:text-xl font-bold leading-none mt-1 tabular-nums ${s.color} sm:text-white`}>{s.value}</div>
                 </div>
               </div>
             ))}

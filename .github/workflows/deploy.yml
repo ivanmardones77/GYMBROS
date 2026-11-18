@@ -24,6 +24,19 @@ jobs:
           node-version: 22
       - run: npm install --legacy-peer-deps --no-audit --no-fund
       - run: npx vite build
+      - name: Compress 3D model textures (WebP, max 1024 px)
+        run: |
+          for f in dist/models/*.glb; do
+            size=1024
+            case "$(basename "$f")" in food_*) size=512;; esac
+            if npx -y @gltf-transform/cli@4 resize "$f" /tmp/r.glb --width $size --height $size \
+              && npx -y @gltf-transform/cli@4 webp /tmp/r.glb /tmp/w.glb; then
+              mv /tmp/w.glb "$f"
+            else
+              echo "Keeping original $f"
+            fi
+          done
+          du -sh dist/models
       - uses: actions/upload-pages-artifact@v3
         with:
           path: dist

@@ -77,6 +77,7 @@ export const Athlete3DViewer: React.FC<Athlete3DViewerProps> = ({
   const aiMixerRef = useRef<THREE.AnimationMixer | null>(null);
   const unmountedFlag = useRef(false);
   const aiModelRef = useRef(aiModel);
+  const [aiLoading, setAiLoading] = useState(false);
   aiModelRef.current = aiModel;
   const sceneRef = useRef<THREE.Scene | null>(null);
   const propsRef = useRef({
@@ -215,11 +216,11 @@ export const Athlete3DViewer: React.FC<Athlete3DViewerProps> = ({
     scene.add(rackGroup);
 
     // Magnific bench replaces the procedural dumbbell rack once loaded
-    loadGlbAsset(MODEL_URLS.bench, 1.15)
+    loadGlbAsset(MODEL_URLS.bench, 1.0)
       .then(({ root }) => {
         if (unmountedFlag.current) return;
-        root.position.set(-1.25, -0.1, -1.85);
-        root.rotation.y = 0.55;
+        root.position.set(-1.7, -0.1, -2.4);
+        root.rotation.y = 0.5;
         scene.add(root);
         rackGroup.visible = false;
       })
@@ -475,7 +476,7 @@ export const Athlete3DViewer: React.FC<Athlete3DViewerProps> = ({
       pose: pose === 'tired' || energy < 25 ? 'tired' : pose,
     });
     rigRef.current = nextRig;
-    nextRig.root.visible = !(aiModelRef.current && aiRootRef.current);
+    nextRig.root.visible = !aiModelRef.current;
     scene.add(nextRig.root);
   }, [gender, fitnessScore, skinTone, hairColor, outfit, hasBuff, pose, energy]);
 
@@ -484,7 +485,7 @@ export const Athlete3DViewer: React.FC<Athlete3DViewerProps> = ({
   useEffect(() => {
     const scene = sceneRef.current;
     if (!scene) return;
-    if (rigRef.current && !aiModel) rigRef.current.root.visible = true;
+    if (rigRef.current) rigRef.current.root.visible = !aiModel;
     const clearAi = () => {
       if (aiRootRef.current) {
         scene.remove(aiRootRef.current);
@@ -497,9 +498,11 @@ export const Athlete3DViewer: React.FC<Athlete3DViewerProps> = ({
       return;
     }
     let cancelled = false;
+    if (!aiRootRef.current) setAiLoading(true);
     loadGlbAsset(aiUrl, gender === 'female' ? 1.68 : 1.8)
       .then(({ root, animations }) => {
         if (cancelled || unmountedFlag.current || sceneRef.current !== scene) return;
+        setAiLoading(false);
         clearAi();
         root.position.y = -0.05;
         scene.add(root);
@@ -512,6 +515,7 @@ export const Athlete3DViewer: React.FC<Athlete3DViewerProps> = ({
         }
       })
       .catch(() => {
+        setAiLoading(false);
         clearAi();
         if (rigRef.current) rigRef.current.root.visible = true;
       });
@@ -541,6 +545,12 @@ export const Athlete3DViewer: React.FC<Athlete3DViewerProps> = ({
   return (
     <div className={`relative rounded-xl overflow-hidden bg-black ${className}`}>
       <div ref={mountRef} className="w-full h-full" />
+      {aiModel && aiLoading && (
+        <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-3">
+          <span className="w-9 h-9 rounded-full border-[3px] border-white/15 border-t-orange-500 animate-spin" />
+          <span className="font-display uppercase tracking-[0.18em] font-bold text-xs text-white/60">Cargando atleta…</span>
+        </div>
+      )}
       {kineticMode !== 'none' && (
         <span
           className={`pointer-events-none absolute top-2.5 left-3 text-[11px] font-bold tracking-tight ${
