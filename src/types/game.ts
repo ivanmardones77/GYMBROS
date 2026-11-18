@@ -32,6 +32,58 @@ export interface PersonalBestRecord {
   plays: number;
 }
 
+export type HonorMedalId =
+  | 'medal_titan_bench'
+  | 'medal_mach_sprint'
+  | 'medal_ko_precision'
+  | 'medal_zero_junk'
+  | 'medal_iron_legs'
+  | 'medal_cardio_storm';
+
+export interface HonorMedalUnlockRecord {
+  unlockedAt: string;
+  timesEarned: number;
+  bestScore: number;
+}
+
+export interface ActiveHonorModifier {
+  medalId: HonorMedalId;
+  medalTitle: string;
+  modifierName: string;
+  effectSummary: string;
+  expiresAt: number;
+  durationMin: number;
+  muscleMult?: number;
+  fatBurnMult?: number;
+  xpMult?: number;
+  coinMult?: number;
+  leagueMult?: number;
+  energyDiscountPct?: number;
+}
+
+export interface HonorMedalDefinition {
+  id: HonorMedalId;
+  title: string;
+  subtitle: string;
+  tierLabel: string;
+  challengeText: string;
+  modifierName: string;
+  effectSummary: string;
+  durationMin: number;
+  applicableGames: MinigameId[];
+  minDifficulty: DifficultyLevel;
+  minScore?: number;
+  minAccuracyPct?: number;
+  minCombo?: number;
+  instantEnergyBonus?: number;
+  muscleMult?: number;
+  fatBurnMult?: number;
+  xpMult?: number;
+  coinMult?: number;
+  leagueMult?: number;
+  energyDiscountPct?: number;
+}
+
 export interface PlayerStats {
   name: string;
   gender: Gender;
@@ -81,6 +133,8 @@ export interface PlayerStats {
   workoutsToday: number;
   healthyMealsToday: number;
   personalBests?: Partial<Record<MinigameId, PersonalBestRecord>>;
+  honorMedals?: Partial<Record<HonorMedalId, HonorMedalUnlockRecord>>;
+  activeHonorModifiers?: ActiveHonorModifier[];
   lastActiveDate?: string;
   lastEnergyTickAt?: number;
   currentWeekKey?: string;

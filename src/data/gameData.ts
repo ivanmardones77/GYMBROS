@@ -1,9 +1,12 @@
 import {
   Achievement,
+  ActiveHonorModifier,
   DifficultyLevel,
   Gender,
+  HonorMedalDefinition,
   MealItem,
   MinigameId,
+  MinigameResult,
   MultiplayerRival,
   OutfitId,
   PhysiqueStage,
@@ -453,6 +456,163 @@ export const ACHIEVEMENTS: Achievement[] = [
   },
 ];
 
+export const HONOR_MEDALS: HonorMedalDefinition[] = [
+  {
+    id: 'medal_titan_bench',
+    title: 'Titán del Hierro',
+    subtitle: 'Press de Banca Explosivo',
+    tierLabel: 'Maestría Fuerza',
+    challengeText: 'Nivel 4+ · Precisión ≥ 88% · Combo ≥ 8',
+    modifierName: 'Sobrecompensación Anabólica',
+    effectSummary: '+30% Músculo · +20% XP',
+    durationMin: 20,
+    applicableGames: ['bench'],
+    minDifficulty: 4,
+    minAccuracyPct: 88,
+    minCombo: 8,
+    muscleMult: 1.3,
+    xpMult: 1.2,
+  },
+  {
+    id: 'medal_mach_sprint',
+    title: 'Relámpago HIIT',
+    subtitle: 'Sprint HIIT en Cinta',
+    tierLabel: 'Maestría Velocidad',
+    challengeText: 'Nivel 3+ · 2,600+ pts · Combo ≥ 10',
+    modifierName: 'Metabolismo Supersónico',
+    effectSummary: '+35% Quema de Grasa · -20% Coste Energía',
+    durationMin: 20,
+    applicableGames: ['sprint'],
+    minDifficulty: 3,
+    minScore: 2600,
+    minCombo: 10,
+    fatBurnMult: 1.35,
+    energyDiscountPct: 0.2,
+  },
+  {
+    id: 'medal_ko_precision',
+    title: 'Puño Quirúrgico',
+    subtitle: 'Combo Saco de Boxeo',
+    tierLabel: 'Maestría Combate',
+    challengeText: 'Nivel 3+ · Precisión ≥ 92% · Combo ≥ 12',
+    modifierName: 'Flujo de Campeón',
+    effectSummary: '+25% Monedas · +25% Puntos Liga',
+    durationMin: 20,
+    applicableGames: ['boxing'],
+    minDifficulty: 3,
+    minAccuracyPct: 92,
+    minCombo: 12,
+    coinMult: 1.25,
+    leagueMult: 1.25,
+  },
+  {
+    id: 'medal_zero_junk',
+    title: 'Pureza Metabólica',
+    subtitle: 'Plato Fit Express',
+    tierLabel: 'Maestría Nutrición',
+    challengeText: 'Nivel 3+ · Precisión 100% · 1,400+ pts',
+    modifierName: 'Asimilación Perfecta',
+    effectSummary: '+25% Músculo · +25% Quema · +10 Energía al activar',
+    durationMin: 25,
+    applicableGames: ['macros'],
+    minDifficulty: 3,
+    minScore: 1400,
+    minAccuracyPct: 100,
+    instantEnergyBonus: 10,
+    muscleMult: 1.25,
+    fatBurnMult: 1.25,
+  },
+  {
+    id: 'medal_iron_legs',
+    title: 'Acero Implacable',
+    subtitle: 'Sentadilla de Hierro',
+    tierLabel: 'Maestría Potencia',
+    challengeText: 'Nivel 4+ · Precisión ≥ 90% · 2,200+ pts',
+    modifierName: 'Potencia de Élite',
+    effectSummary: '+35% Músculo · +20% XP',
+    durationMin: 20,
+    applicableGames: ['squats'],
+    minDifficulty: 4,
+    minScore: 2200,
+    minAccuracyPct: 90,
+    muscleMult: 1.35,
+    xpMult: 1.2,
+  },
+  {
+    id: 'medal_cardio_storm',
+    title: 'Tormenta Sin Aliento',
+    subtitle: 'Cuerda Turbo o Battle Ropes',
+    tierLabel: 'Maestría Resistencia',
+    challengeText: 'Nivel 4+ · 2,800+ pts · Combo ≥ 14',
+    modifierName: 'Aura Imparable',
+    effectSummary: '+25% Monedas · +25% XP · +30% Liga',
+    durationMin: 20,
+    applicableGames: ['rope', 'battle_ropes'],
+    minDifficulty: 4,
+    minScore: 2800,
+    minCombo: 14,
+    coinMult: 1.25,
+    xpMult: 1.25,
+    leagueMult: 1.3,
+  },
+];
+
+export function evaluateHonorMedals(
+  result: MinigameResult,
+  accuracyPct: number
+): HonorMedalDefinition[] {
+  return HONOR_MEDALS.filter((m) => {
+    if (!m.applicableGames.includes(result.gameId)) return false;
+    if (result.difficulty < m.minDifficulty) return false;
+    if (m.minScore !== undefined && result.score < m.minScore) return false;
+    if (m.minAccuracyPct !== undefined && accuracyPct < m.minAccuracyPct) return false;
+    if (m.minCombo !== undefined && result.maxCombo < m.minCombo) return false;
+    return true;
+  });
+}
+
+export function getActiveHonorModifiers(
+  modifiers?: ActiveHonorModifier[],
+  now = Date.now()
+): ActiveHonorModifier[] {
+  if (!Array.isArray(modifiers) || modifiers.length === 0) return [];
+  return modifiers.filter((m) => typeof m.expiresAt === 'number' && m.expiresAt > now);
+}
+
+export function aggregateHonorBonuses(modifiers: ActiveHonorModifier[]) {
+  let muscleMult = 1;
+  let fatBurnMult = 1;
+  let xpMult = 1;
+  let coinMult = 1;
+  let leagueMult = 1;
+  let energyDiscountPct = 0;
+
+  for (const mod of modifiers) {
+    if (mod.muscleMult) muscleMult += mod.muscleMult - 1;
+    if (mod.fatBurnMult) fatBurnMult += mod.fatBurnMult - 1;
+    if (mod.xpMult) xpMult += mod.xpMult - 1;
+    if (mod.coinMult) coinMult += mod.coinMult - 1;
+    if (mod.leagueMult) leagueMult += mod.leagueMult - 1;
+    if (mod.energyDiscountPct) energyDiscountPct += mod.energyDiscountPct;
+  }
+
+  return {
+    muscleMult: Number(muscleMult.toFixed(2)),
+    fatBurnMult: Number(fatBurnMult.toFixed(2)),
+    xpMult: Number(xpMult.toFixed(2)),
+    coinMult: Number(coinMult.toFixed(2)),
+    leagueMult: Number(leagueMult.toFixed(2)),
+    energyDiscountPct: Math.min(0.45, Number(energyDiscountPct.toFixed(2))),
+  };
+}
+
+export function formatRemainingTime(expiresAt: number, now = Date.now()): string {
+  const totalSec = Math.max(0, Math.ceil((expiresAt - now) / 1000));
+  const mins = Math.floor(totalSec / 60);
+  const secs = totalSec % 60;
+  return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+}
+
 export interface DailyRewardStep {
   day: number;
   title: string;
@@ -701,6 +861,8 @@ export function createInitialPlayer(
     workoutsToday: 0,
     healthyMealsToday: 0,
     personalBests: {},
+    honorMedals: {},
+    activeHonorModifiers: [],
     lastActiveDate: getLocalDateKey(),
     lastEnergyTickAt: Date.now(),
     currentWeekKey: getIsoWeekKey(),

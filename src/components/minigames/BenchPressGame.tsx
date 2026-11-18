@@ -18,10 +18,13 @@ import {
 } from '../../three/threeUtils';
 
 import { AthleteBuildOptions, buildAthleteModel } from '../../three/buildAthleteModel';
+import { GlbPoseRig, loadMinigameGlbAthlete } from '../../three/buildGlbAthlete';
+import { buildBenchPressStation3D, buildOlympicBarbell } from '../../three/gymProps';
 
 interface BenchPressGameProps {
   difficulty: DifficultyLevel;
   athlete?: Omit<AthleteBuildOptions, 'pose' | 'hasBuff'>;
+  aiModel?: boolean;
   rivalTargetScore?: number;
   rivalName?: string;
   onComplete: (result: MinigameResult) => void;
@@ -33,6 +36,7 @@ const TOTAL_REPS = 10;
 export const BenchPressGame: React.FC<BenchPressGameProps> = ({
   difficulty,
   athlete,
+  aiModel = true,
   rivalTargetScore,
   rivalName,
   onComplete,
@@ -141,59 +145,11 @@ export const BenchPressGame: React.FC<BenchPressGameProps> = ({
     floor.receiveShadow = true;
     scene.add(floor);
 
-    // Steel Power Rack
-    const steelMat = new THREE.MeshStandardMaterial({ color: 0x2b2b2b, roughness: 0.35, metalness: 0.82 });
-    const chromeMat = new THREE.MeshPhysicalMaterial({
-      color: 0xe2e8f0,
-      metalness: 0.94,
-      roughness: 0.16,
-      anisotropy: 0.7,
-    });
-    const benchPadMat = new THREE.MeshStandardMaterial({ color: 0x1c1c1c, roughness: 0.65, metalness: 0.05 });
-
-    const rackGroup = new THREE.Group();
-    const postGeo = new THREE.BoxGeometry(0.11, 2.4, 0.11);
-    const postPositions: [number, number][] = [
-      [-1.1, -0.45],
-      [1.1, -0.45],
-      [-1.1, 0.45],
-      [1.1, 0.45],
-    ];
-    for (const [px, pz] of postPositions) {
-      const post = new THREE.Mesh(postGeo, steelMat);
-      post.position.set(px, 1.2, pz);
-      post.castShadow = true;
-      rackGroup.add(post);
-    }
-    const topBar = new THREE.Mesh(new THREE.BoxGeometry(2.35, 0.1, 0.12), steelMat);
-    topBar.position.set(0, 2.35, -0.45);
-    rackGroup.add(topBar);
-
-    // Reactive LED strips on front rack uprights
-    const rackLedMat = new THREE.MeshStandardMaterial({
-      color: 0xff5a1f,
-      emissive: 0xff5a1f,
-      emissiveIntensity: 0.35,
-      roughness: 0.25,
-    });
-    for (const sideX of [-1.04, 1.04]) {
-      const strip = new THREE.Mesh(new THREE.BoxGeometry(0.025, 1.9, 0.025), rackLedMat);
-      strip.position.set(sideX, 1.2, 0.51);
-      rackGroup.add(strip);
-    }
-
-    // Bench
-    const benchPad = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.12, 1.5), benchPadMat);
-    benchPad.position.set(0, 0.56, 0.2);
-    benchPad.castShadow = true;
-    const benchLeg1 = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.52, 0.12), steelMat);
-    benchLeg1.position.set(0, 0.26, -0.35);
-    const benchLeg2 = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.52, 0.12), steelMat);
-    benchLeg2.position.set(0, 0.26, 0.75);
-    rackGroup.add(benchPad, benchLeg1, benchLeg2);
+    // Competition Bench Press Half-Rack + Contoured Stitched Bench + Spotter Arms
+    const { group: rackGroup, rackLedMat } = buildBenchPressStation3D();
     scene.add(rackGroup);
 
-    // Sculpted Lifter Athlete lying supine on the bench
+    // Sculpted Lifter Athlete lying supine on the bench (procedural fallback until GLB resolves)
     const lifter = buildAthleteModel({
       gender: athlete?.gender ?? 'male',
       fitnessScore: athlete?.fitnessScore ?? 65,
@@ -211,44 +167,41 @@ export const BenchPressGame: React.FC<BenchPressGameProps> = ({
     lifter.rightKneePivot.rotation.x = 1.4;
     scene.add(lifter.root);
 
-    // Composite Olympic Barbell Group
-    const barbellGroup = new THREE.Group();
+    let glbLifter: GlbPoseRig | null = null;
+    const tmpShoulderPos = new THREE.Vector3();
+    let benchOffsetY = 0.68;
+    let benchOffsetZ = 1.38;
+    loadMinigameGlbAthlete({
+      scene,
+      gender: athlete?.gender ?? 'male',
+      fitnessScore: athlete?.fitnessScore ?? 65,
+      outfit: athlete?.outfit ?? 'pro',
+      aiModel,
+      isCancelled: () => unmounted,
+      onLoaded: (rig) => {
+        rig.root.rotation.x = -Math.PI / 2;
+        rig.root.position.set(0, 0, 0);
+        rig.poseBenchPress(barLiftCurrentRef.current);
+        if (rig.bones.spine) {
+          rig.bones.spine.getWorldPosition(tmpShoulderPos);
+          benchOffsetZ = 0.05 - tmpShoulderPos.z;
+          benchOffsetY = 0.72 - tmpShoulderPos.y;
+        }
+        rig.root.position.set(0, benchOffsetY, benchOffsetZ);
+        scene.add(rig.root);
+        glbLifter = rig;
+        lifter.root.visible = false;
+      },
+    });
+
+    // Knurled Olympic Barbell + Calibrated Bumper Plates + Spin-Lock Collars
+    const { group: barbellGroup, platePairs } = buildOlympicBarbell({
+      plateBaseX: 1.24,
+      maxPlates: 5,
+      plateStep: 0.068,
+      plateBaseRadius: 0.34,
+    });
     barbellGroup.position.set(0, 1.05, 0.05);
-
-    const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.024, 0.024, 3.2, 16), chromeMat);
-    shaft.rotation.z = Math.PI / 2;
-    shaft.castShadow = true;
-    barbellGroup.add(shaft);
-
-    const sleeveGeo = new THREE.CylinderGeometry(0.042, 0.042, 0.48, 16);
-    sleeveGeo.rotateZ(Math.PI / 2);
-    const leftSleeve = new THREE.Mesh(sleeveGeo, chromeMat);
-    leftSleeve.position.x = -1.42;
-    const rightSleeve = new THREE.Mesh(sleeveGeo, chromeMat);
-    rightSleeve.position.x = 1.42;
-    barbellGroup.add(leftSleeve, rightSleeve);
-
-    // 5 Dynamic Bumper Plates per side
-    const plateColors = [0xff5a1f, 0x0284c7, 0x10b981, 0xf59e0b, 0xe11d48];
-    const platePairs: [THREE.Mesh, THREE.Mesh][] = [];
-    for (let i = 0; i < 5; i++) {
-      const radius = 0.34 - i * 0.03;
-      const pGeo = new THREE.CylinderGeometry(radius, radius, 0.055, 28);
-      pGeo.rotateZ(Math.PI / 2);
-      const pMat = new THREE.MeshStandardMaterial({
-        color: plateColors[i],
-        roughness: 0.45,
-        metalness: 0.18,
-      });
-      const leftP = new THREE.Mesh(pGeo, pMat);
-      leftP.position.x = -1.24 - i * 0.068;
-      leftP.castShadow = true;
-      const rightP = new THREE.Mesh(pGeo, pMat);
-      rightP.position.x = 1.24 + i * 0.068;
-      rightP.castShadow = true;
-      barbellGroup.add(leftP, rightP);
-      platePairs.push([leftP, rightP]);
-    }
     scene.add(barbellGroup);
 
     // 3D Impact Spark Particles around Barbell
@@ -320,17 +273,22 @@ export const BenchPressGame: React.FC<BenchPressGameProps> = ({
         dt
       );
       barTiltRef.current = THREE.MathUtils.damp(barTiltRef.current, 0, 10, dt);
-      barbellGroup.position.y = 1.05 + barLiftCurrentRef.current * 0.65;
-      barbellGroup.rotation.z = barTiltRef.current;
 
-      // Articulate lifter arms pressing upward with the barbell
       const liftT = barLiftCurrentRef.current;
-      lifter.leftArmPivot.rotation.x = -1.25 - liftT * 0.28;
-      lifter.rightArmPivot.rotation.x = -1.25 - liftT * 0.28;
-      lifter.leftArmPivot.rotation.z = -0.35 + liftT * 0.12;
-      lifter.rightArmPivot.rotation.z = 0.35 - liftT * 0.12;
-      lifter.leftForearmPivot.rotation.x = -1.15 + liftT * 0.95;
-      lifter.rightForearmPivot.rotation.x = -1.15 + liftT * 0.95;
+      const desiredBarY = 0.96 + liftT * 0.2;
+      if (glbLifter) {
+        const achieved = glbLifter.poseBenchPress(liftT, desiredBarY, 0.05);
+        barbellGroup.position.set(0, achieved.barY, achieved.barZ);
+      } else {
+        barbellGroup.position.set(0, 1.05 + liftT * 0.65, 0.05);
+        lifter.leftArmPivot.rotation.x = -1.25 - liftT * 0.28;
+        lifter.rightArmPivot.rotation.x = -1.25 - liftT * 0.28;
+        lifter.leftArmPivot.rotation.z = -0.35 + liftT * 0.12;
+        lifter.rightArmPivot.rotation.z = 0.35 - liftT * 0.12;
+        lifter.leftForearmPivot.rotation.x = -1.15 + liftT * 0.95;
+        lifter.rightForearmPivot.rotation.x = -1.15 + liftT * 0.95;
+      }
+      barbellGroup.rotation.z = barTiltRef.current;
 
       // Plate visibility by current rep load
       const activePlates = platesCountRef.current;

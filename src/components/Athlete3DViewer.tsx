@@ -4,6 +4,14 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { Gender, OutfitId } from '../types/game';
 import { buildAthleteModel, AthleteRigParts } from '../three/buildAthleteModel';
 import {
+  applyAiMaterialState,
+  computeRealisticScale,
+  createGlbAccessories,
+  GLB_OUTFIT_ACCENT,
+  GlbAccessories,
+  GlbPoseRig,
+} from '../three/buildGlbAthlete';
+import {
   afterDraw,
   computeResponsiveCameraZ,
   createKineticParticleTexture,
@@ -56,113 +64,7 @@ const ROUTINE_PALETTE = [
   new THREE.Color('#FBBF24'),
 ];
 
-const OUTFIT_ACCENT: Record<OutfitId, { primary: number; accent: number; metalness: number }> = {
-  basic: { primary: 0x2b2b30, accent: 0xff5a1f, metalness: 0.2 },
-  runner: { primary: 0x0284c7, accent: 0x38bdf8, metalness: 0.35 },
-  pro: { primary: 0x059669, accent: 0x34d399, metalness: 0.42 },
-  titan: { primary: 0xff5a1f, accent: 0xfbbf24, metalness: 0.85 },
-};
-
-interface GlbRigBindings {
-  hips?: THREE.Object3D;
-  spine?: THREE.Object3D;
-  spine01?: THREE.Object3D;
-  spine02?: THREE.Object3D;
-  head?: THREE.Object3D;
-  leftArm?: THREE.Object3D;
-  rightArm?: THREE.Object3D;
-  leftForeArm?: THREE.Object3D;
-  rightForeArm?: THREE.Object3D;
-  leftHand?: THREE.Object3D;
-  rightHand?: THREE.Object3D;
-}
-
-interface GlbAccessories {
-  group: THREE.Group;
-  leftWrist: THREE.Mesh;
-  rightWrist: THREE.Mesh;
-  headband: THREE.Mesh;
-  belt: THREE.Mesh;
-  mat: THREE.MeshStandardMaterial;
-}
-
-function applyWorldAxisRotationOffset(
-  bone: THREE.Object3D | undefined,
-  axis: THREE.Vector3,
-  angle: number,
-  tmpParentQ: THREE.Quaternion,
-  tmpDeltaWorldQ: THREE.Quaternion,
-  tmpLocalDeltaQ: THREE.Quaternion
-) {
-  if (!bone || !bone.parent || Math.abs(angle) < 0.0005) return;
-  bone.parent.updateMatrixWorld(true);
-  bone.parent.getWorldQuaternion(tmpParentQ);
-  tmpDeltaWorldQ.setFromAxisAngle(axis, angle);
-  tmpLocalDeltaQ
-    .copy(tmpParentQ)
-    .invert()
-    .multiply(tmpDeltaWorldQ)
-    .multiply(tmpParentQ);
-  bone.quaternion.premultiply(tmpLocalDeltaQ);
-}
-
-function createGlbAccessories(): GlbAccessories {
-  const group = new THREE.Group();
-  const mat = new THREE.MeshStandardMaterial({
-    color: 0xff5a1f,
-    emissive: 0xff5a1f,
-    emissiveIntensity: 0.25,
-    roughness: 0.28,
-    metalness: 0.65,
-  });
-
-  const wristGeo = new THREE.TorusGeometry(0.044, 0.012, 10, 24);
-  const leftWrist = new THREE.Mesh(wristGeo, mat);
-  const rightWrist = new THREE.Mesh(wristGeo, mat);
-
-  const headbandGeo = new THREE.TorusGeometry(0.108, 0.013, 10, 28);
-  const headband = new THREE.Mesh(headbandGeo, mat);
-
-  const beltGeo = new THREE.TorusGeometry(0.175, 0.014, 10, 32);
-  const belt = new THREE.Mesh(beltGeo, mat);
-
-  group.add(leftWrist, rightWrist, headband, belt);
-  return { group, leftWrist, rightWrist, headband, belt, mat };
-}
-
-function computeRealisticScale(fitnessScore: number): { sx: number; sy: number; sz: number } {
-  // Smooth continuous proportion shift between start (14..49) and elite (50..100)
-  if (fitnessScore < 50) {
-    const t = THREE.MathUtils.clamp((fitnessScore - 14) / 36, 0, 1);
-    return {
-      sx: 1.04 - t * 0.05,
-      sy: 0.99 + t * 0.02,
-      sz: 1.07 - t * 0.08,
-    };
-  }
-  const t = THREE.MathUtils.clamp((fitnessScore - 50) / 50, 0, 1);
-  return {
-    sx: 0.98 + t * 0.05,
-    sy: 1.0 + t * 0.02,
-    sz: 0.98 + t * 0.02,
-  };
-}
-
-function applyAiMaterialState(root: THREE.Object3D, outfit: OutfitId, hasBuff: boolean) {
-  const outfitCfg = OUTFIT_ACCENT[outfit] || OUTFIT_ACCENT.basic;
-  root.traverse((obj) => {
-    const m = obj as THREE.Mesh;
-    if (!m.isMesh || !m.material) return;
-    const mats = Array.isArray(m.material) ? m.material : [m.material];
-    for (const mat of mats) {
-      if (mat instanceof THREE.MeshStandardMaterial) {
-        mat.emissive.setHex(hasBuff || outfit === 'titan' ? outfitCfg.accent : 0x000000);
-        mat.emissiveIntensity = hasBuff ? 0.12 : outfit === 'titan' ? 0.06 : 0;
-        mat.needsUpdate = true;
-      }
-    }
-  });
-}
+// GLB outfit accent & rig helpers imported from ../three/buildGlbAthlete
 
 export const Athlete3DViewer: React.FC<Athlete3DViewerProps> = ({
   gender,
@@ -191,7 +93,7 @@ export const Athlete3DViewer: React.FC<Athlete3DViewerProps> = ({
   const rigRef = useRef<AthleteRigParts | null>(null);
   const aiRootRef = useRef<THREE.Group | null>(null);
   const aiMixerRef = useRef<THREE.AnimationMixer | null>(null);
-  const aiBonesRef = useRef<GlbRigBindings>({});
+  const aiRigRef = useRef<GlbPoseRig | null>(null);
   const aiAccRef = useRef<GlbAccessories | null>(null);
   const unmountedFlag = useRef(false);
   const aiModelRef = useRef(aiModel);
@@ -498,11 +400,6 @@ export const Athlete3DViewer: React.FC<Athlete3DViewerProps> = ({
 
     // Reusable math temporaries (zero per-frame GC allocation)
     const axisX = new THREE.Vector3(1, 0, 0);
-    const axisY = new THREE.Vector3(0, 1, 0);
-    const axisZ = new THREE.Vector3(0, 0, 1);
-    const tmpParentQ = new THREE.Quaternion();
-    const tmpDeltaWorldQ = new THREE.Quaternion();
-    const tmpLocalDeltaQ = new THREE.Quaternion();
     const tmpPos = new THREE.Vector3();
     const tmpQuat = new THREE.Quaternion();
     const tmpUp = new THREE.Vector3();
@@ -579,38 +476,22 @@ export const Athlete3DViewer: React.FC<Athlete3DViewerProps> = ({
 
       // Animate & customize Realistic GLB rig
       const aiRoot = aiRootRef.current;
-      const bones = aiBonesRef.current;
-      if (aiRoot && aiModelRef.current) {
+      const aiRig = aiRigRef.current;
+      if (aiRoot && aiRig && aiModelRef.current) {
+        const bones = aiRig.bones;
         const scaleTarget = computeRealisticScale(cur.fitnessScore);
         aiRoot.scale.x = THREE.MathUtils.damp(aiRoot.scale.x, scaleTarget.sx, 5, dt);
         aiRoot.scale.y = THREE.MathUtils.damp(aiRoot.scale.y, scaleTarget.sy, 5, dt);
         aiRoot.scale.z = THREE.MathUtils.damp(aiRoot.scale.z, scaleTarget.sz, 5, dt);
 
-        // Apply world-space expressive pose overlays on top of GLB idle clip
-        if (flexBlend > 0.01) {
-          const chestLift = -0.08 * flexBlend;
-          applyWorldAxisRotationOffset(bones.spine01, axisX, chestLift, tmpParentQ, tmpDeltaWorldQ, tmpLocalDeltaQ);
-          applyWorldAxisRotationOffset(bones.head, axisX, -0.06 * flexBlend, tmpParentQ, tmpDeltaWorldQ, tmpLocalDeltaQ);
-          applyWorldAxisRotationOffset(bones.leftArm, axisZ, 1.32 * flexBlend, tmpParentQ, tmpDeltaWorldQ, tmpLocalDeltaQ);
-          applyWorldAxisRotationOffset(bones.rightArm, axisZ, -1.32 * flexBlend, tmpParentQ, tmpDeltaWorldQ, tmpLocalDeltaQ);
-          applyWorldAxisRotationOffset(bones.leftArm, axisY, 0.18 * flexBlend, tmpParentQ, tmpDeltaWorldQ, tmpLocalDeltaQ);
-          applyWorldAxisRotationOffset(bones.rightArm, axisY, -0.18 * flexBlend, tmpParentQ, tmpDeltaWorldQ, tmpLocalDeltaQ);
-          applyWorldAxisRotationOffset(bones.leftForeArm, axisZ, 1.55 * flexBlend, tmpParentQ, tmpDeltaWorldQ, tmpLocalDeltaQ);
-          applyWorldAxisRotationOffset(bones.rightForeArm, axisZ, -1.55 * flexBlend, tmpParentQ, tmpDeltaWorldQ, tmpLocalDeltaQ);
-        }
-
-        if (tiredBlend > 0.01) {
-          const pant = Math.sin(elapsed * 3.4) * 0.025 * tiredBlend;
-          applyWorldAxisRotationOffset(bones.spine, axisX, 0.12 * tiredBlend + pant, tmpParentQ, tmpDeltaWorldQ, tmpLocalDeltaQ);
-          applyWorldAxisRotationOffset(bones.spine01, axisX, 0.12 * tiredBlend, tmpParentQ, tmpDeltaWorldQ, tmpLocalDeltaQ);
-          applyWorldAxisRotationOffset(bones.head, axisX, 0.18 * tiredBlend, tmpParentQ, tmpDeltaWorldQ, tmpLocalDeltaQ);
-        }
+        // Apply clean character-space Double-Biceps Flex / Tired breathing pose
+        aiRig.applyViewerPoseOverlay(flexBlend, tiredBlend, elapsed);
 
         // Sync 3D athletic accessories to live skeleton bones
         aiRoot.updateMatrixWorld(true);
         const acc = aiAccRef.current;
         if (acc) {
-          const outfitCfg = OUTFIT_ACCENT[cur.outfit] || OUTFIT_ACCENT.basic;
+          const outfitCfg = GLB_OUTFIT_ACCENT[cur.outfit] || GLB_OUTFIT_ACCENT.basic;
           acc.group.visible = true;
           acc.mat.color.setHex(outfitCfg.accent);
           acc.mat.emissive.setHex(outfitCfg.accent);
@@ -666,7 +547,7 @@ export const Athlete3DViewer: React.FC<Athlete3DViewerProps> = ({
       }
 
       // Sync podium rim & floor light with outfit or active kinetic energy
-      const outfitAccentHex = (OUTFIT_ACCENT[cur.outfit] || OUTFIT_ACCENT.basic).accent;
+      const outfitAccentHex = (GLB_OUTFIT_ACCENT[cur.outfit] || GLB_OUTFIT_ACCENT.basic).accent;
       if (kineticAlpha > 0.01) {
         kineticPoints.visible = true;
         const speedMult = (cur.kineticMode === 'combo' ? 1.45 : 1.1) + burstImpulse * 1.65;
@@ -737,7 +618,7 @@ export const Athlete3DViewer: React.FC<Athlete3DViewerProps> = ({
       unmountedFlag.current = true;
       aiRootRef.current = null;
       aiMixerRef.current = null;
-      aiBonesRef.current = {};
+      aiRigRef.current = null;
       aiAccRef.current = null;
       controlsRef.current = null;
       cameraRef.current = null;
@@ -789,7 +670,7 @@ export const Athlete3DViewer: React.FC<Athlete3DViewerProps> = ({
         aiRootRef.current = null;
       }
       aiMixerRef.current = null;
-      aiBonesRef.current = {};
+      aiRigRef.current = null;
     };
 
     if (!aiModel) {
@@ -812,46 +693,7 @@ export const Athlete3DViewer: React.FC<Athlete3DViewerProps> = ({
         const initScale = computeRealisticScale(fitnessScore);
         root.scale.set(initScale.sx, initScale.sy, initScale.sz);
 
-        // Bind skeleton bones for real-time poses and accessories
-        const bones: GlbRigBindings = {};
-        root.traverse((obj) => {
-          switch (obj.name) {
-            case 'Hips':
-              bones.hips = obj;
-              break;
-            case 'Spine':
-              bones.spine = obj;
-              break;
-            case 'Spine01':
-              bones.spine01 = obj;
-              break;
-            case 'Spine02':
-              bones.spine02 = obj;
-              break;
-            case 'Head':
-              bones.head = obj;
-              break;
-            case 'LeftArm':
-              bones.leftArm = obj;
-              break;
-            case 'RightArm':
-              bones.rightArm = obj;
-              break;
-            case 'LeftForeArm':
-              bones.leftForeArm = obj;
-              break;
-            case 'RightForeArm':
-              bones.rightForeArm = obj;
-              break;
-            case 'LeftHand':
-              bones.leftHand = obj;
-              break;
-            case 'RightHand':
-              bones.rightHand = obj;
-              break;
-          }
-        });
-        aiBonesRef.current = bones;
+        aiRigRef.current = new GlbPoseRig(root);
 
         applyAiMaterialState(root, propsRef.current.outfit, propsRef.current.hasBuff);
         scene.add(root);

@@ -18,6 +18,7 @@ import {
   loadGlbAsset,
   MODEL_URLS,
 } from '../../three/threeUtils';
+import { buildBoxingGlove3D, buildBoxingRig3D } from '../../three/gymProps';
 
 interface BoxingBagGameProps {
   difficulty: DifficultyLevel;
@@ -77,11 +78,16 @@ export const BoxingBagGame: React.FC<BoxingBagGameProps> = ({
   const targetIdRef = useRef(1);
   const completedRef = useRef(false);
 
-  // Heavy bag spring state
+  // Heavy bag spring state & kinetic glove punch targets
   const bagAngleZRef = useRef(0);
   const bagVelZRef = useRef(0);
   const bagAngleXRef = useRef(0);
   const bagVelXRef = useRef(0);
+  const punchAnimRef = useRef<{ side: 'L' | 'R'; progress: number; pad: PadId }>({
+    side: 'L',
+    progress: 0,
+    pad: 0,
+  });
 
   const spawnTarget = useCallback(() => {
     const pad = Math.floor(Math.random() * 4) as PadId;
@@ -136,10 +142,15 @@ export const BoxingBagGame: React.FC<BoxingBagGameProps> = ({
         setCombo(comboRef.current);
         setFeedback(isPerfect ? `¡IMPACTO PERFECTO! +${pts} pts` : `¡Buen golpe! +${pts} pts`);
 
-        // Kick spring velocity on heavy bag
+        // Kick spring velocity on heavy bag & throw corresponding 3D boxing glove
         const sideSign = pad === 0 || pad === 2 ? 1 : -1;
         bagVelZRef.current = sideSign * (isPerfect ? 4.8 : 3.2);
         bagVelXRef.current = -2.4;
+        punchAnimRef.current = {
+          side: pad === 0 || pad === 2 ? 'L' : 'R',
+          progress: 1.0,
+          pad,
+        };
 
         if (isPerfect) sound.playPerfect();
         else sound.playPunch();
@@ -202,15 +213,24 @@ export const BoxingBagGame: React.FC<BoxingBagGameProps> = ({
     floor.receiveShadow = true;
     scene.add(floor);
 
-    // Overhead Steel Hanging Rig
+    // Full Heavy Steel A-Frame Boxing Rig + Swivel Shackle
+    const boxingRig = buildBoxingRig3D();
+    scene.add(boxingRig);
     const metalMat = new THREE.MeshStandardMaterial({ color: 0x64748b, metalness: 0.85, roughness: 0.25 });
-    const topBeam = new THREE.Mesh(new THREE.BoxGeometry(3.2, 0.12, 0.14), metalMat);
-    topBeam.position.set(0, 2.75, 0);
-    scene.add(topBeam);
 
-    // Swinging Heavy Bag Pivot at (0, 2.7, 0)
+    // Dual Animated 3D Boxing Gloves in foreground guard stance
+    const leftGlove = buildBoxingGlove3D(-1);
+    const rightGlove = buildBoxingGlove3D(1);
+    const leftRestPos = new THREE.Vector3(-0.62, 1.04, 1.45);
+    const rightRestPos = new THREE.Vector3(0.62, 1.04, 1.45);
+    leftGlove.position.copy(leftRestPos);
+    rightGlove.position.copy(rightRestPos);
+    scene.add(leftGlove, rightGlove);
+    const tmpPunchTarget = new THREE.Vector3();
+
+    // Swinging Heavy Bag Pivot at (0, 2.65, 0)
     const bagPivot = new THREE.Group();
-    bagPivot.position.set(0, 2.7, 0);
+    bagPivot.position.set(0, 2.65, 0);
     scene.add(bagPivot);
 
     const chain = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, 0.55, 10), metalMat);
@@ -252,25 +272,32 @@ export const BoxingBagGame: React.FC<BoxingBagGameProps> = ({
       })
       .catch(() => {});
 
-    // 4 Interactive 3D Target Pads
+    // 4 Interactive Sculpted Focus Mitt Target Pads
     const padGroups: THREE.Group[] = [];
     const padRings: THREE.Mesh[] = [];
     const clickableMeshes: THREE.Mesh[] = [];
+    const mittBackMat = new THREE.MeshStandardMaterial({ color: 0x0f172a, roughness: 0.55, metalness: 0.15 });
 
     ([0, 1, 2, 3] as PadId[]).forEach((padId) => {
       const grp = new THREE.Group();
       grp.position.set(...PAD_META[padId].pos);
 
       const coreMat = new THREE.MeshStandardMaterial({
-        color: 0x2b2b2b,
-        roughness: 0.4,
-        metalness: 0.2,
+        color: 0x262932,
+        roughness: 0.36,
+        metalness: 0.18,
       });
-      const core = new THREE.Mesh(new THREE.CylinderGeometry(0.24, 0.24, 0.08, 24), coreMat);
-      core.rotation.x = Math.PI / 2;
+      const core = new THREE.Mesh(new THREE.SphereGeometry(0.24, 22, 16), coreMat);
+      core.scale.set(1.0, 1.12, 0.36);
       core.userData.padId = padId;
+      core.castShadow = true;
       grp.add(core);
       clickableMeshes.push(core);
+
+      const mittRim = new THREE.Mesh(new THREE.TorusGeometry(0.23, 0.024, 10, 24), mittBackMat);
+      mittRim.scale.set(1.0, 1.12, 1.0);
+      mittRim.position.z = -0.02;
+      grp.add(mittRim);
 
       const ringMat = new THREE.MeshStandardMaterial({
         color: 0xff6a2b,
@@ -278,8 +305,8 @@ export const BoxingBagGame: React.FC<BoxingBagGameProps> = ({
         emissiveIntensity: 0.9,
         roughness: 0.25,
       });
-      const ring = new THREE.Mesh(new THREE.TorusGeometry(0.3, 0.032, 10, 28), ringMat);
-      ring.position.z = 0.03;
+      const ring = new THREE.Mesh(new THREE.TorusGeometry(0.32, 0.032, 10, 28), ringMat);
+      ring.position.z = 0.06;
       ring.visible = false;
       grp.add(ring);
 
@@ -367,6 +394,24 @@ export const BoxingBagGame: React.FC<BoxingBagGameProps> = ({
       bagPivot.rotation.z = bagAngleZRef.current;
       bagPivot.rotation.x = bagAngleXRef.current;
 
+      // Animate guard bob & snap-punch trajectories for 3D boxing gloves
+      const bobY = Math.sin(now * 0.0055) * 0.035;
+      leftGlove.position.set(leftRestPos.x, leftRestPos.y + bobY, leftRestPos.z);
+      rightGlove.position.set(rightRestPos.x, rightRestPos.y - bobY, rightRestPos.z);
+      leftGlove.rotation.set(-0.22, 0.18, 0.12);
+      rightGlove.rotation.set(-0.22, -0.18, -0.12);
+
+      if (punchAnimRef.current.progress > 0.005) {
+        punchAnimRef.current.progress = Math.max(0, punchAnimRef.current.progress - dt * 5.2);
+        const snap = Math.sin(punchAnimRef.current.progress * Math.PI);
+        const pPos = PAD_META[punchAnimRef.current.pad].pos;
+        tmpPunchTarget.set(pPos[0] * 0.72, pPos[1], pPos[2] + 0.18);
+        const glove = punchAnimRef.current.side === 'L' ? leftGlove : rightGlove;
+        glove.position.lerp(tmpPunchTarget, snap);
+        glove.rotation.x = -0.35 - snap * 0.35;
+        glove.rotation.z += (punchAnimRef.current.side === 'L' ? -1 : 1) * snap * 0.45;
+      }
+
       // Update 3D pad visuals
       const curTarget = targetRef.current;
       const ratio = curTarget ? Math.max(0.15, curTarget.remainingMs / curTarget.totalMs) : 0;
@@ -383,7 +428,7 @@ export const BoxingBagGame: React.FC<BoxingBagGameProps> = ({
           ring.scale.setScalar(0.7 + ratio * 0.65);
           grp.scale.setScalar(1.08);
         } else {
-          mat.color.setHex(0x2b2b2b);
+          mat.color.setHex(0x262932);
           mat.emissive.setHex(0x000000);
           ring.visible = false;
           grp.scale.setScalar(1.0);

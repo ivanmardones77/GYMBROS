@@ -25,9 +25,12 @@ import {
   MOTIVATIONAL_PUSH_POOL,
   OUTFITS,
   ROUTINES,
+  aggregateHonorBonuses,
   applyXpAndLevelUp,
   computeRivalDuelTarget,
   createInitialPlayer,
+  evaluateHonorMedals,
+  getActiveHonorModifiers,
   getDayDiff,
   getIsoWeekKey,
   getLocalDateKey,
@@ -49,6 +52,7 @@ import { WeeklyMultiplayerPanel } from './components/WeeklyMultiplayerPanel';
 import { DailyRewardsModal } from './components/DailyRewardsModal';
 import { NotificationCenter } from './components/NotificationCenter';
 import { GameCard } from './components/GameCard';
+import { HonorMedalsShowcase } from './components/HonorMedalsStrip';
 import { preloadGlbAssets, MODEL_URLS } from './three/threeUtils';
 import {
   RoundSummaryModal,
@@ -128,6 +132,7 @@ export default function App() {
     }
   }, []);
   const [celebrateFlex, setCelebrateFlex] = useState(false);
+  const [honorNowMs, setHonorNowMs] = useState(() => Date.now());
 
   // Warm the 3D model cache in the background so minigames open instantly
   useEffect(() => {
@@ -210,6 +215,8 @@ export default function App() {
             perfectHitsTotal: Math.max(0, safeNum(rawPlayer.perfectHitsTotal, 0)),
             hydrationPct: Math.max(10, Math.min(100, safeNum(rawPlayer.hydrationPct, 75))),
             personalBests: rawPlayer.personalBests || {},
+            honorMedals: rawPlayer.honorMedals || {},
+            activeHonorModifiers: getActiveHonorModifiers(rawPlayer.activeHonorModifiers, now),
             unlockedOutfits: Array.isArray(rawPlayer.unlockedOutfits) && rawPlayer.unlockedOutfits.length > 0
               ? rawPlayer.unlockedOutfits
               : ['basic'],
@@ -385,6 +392,23 @@ export default function App() {
     return () => window.clearInterval(timer);
   }, [screen]);
 
+  // Live 1s countdown & pruning for temporary Honor Modifiers when active
+  const hasActiveHonor = (player?.activeHonorModifiers?.length ?? 0) > 0;
+  useEffect(() => {
+    if (screen !== 'PLAYING' || !hasActiveHonor) return;
+    const timer = window.setInterval(() => {
+      const now = Date.now();
+      setHonorNowMs(now);
+      setPlayer((prev) => {
+        if (!prev?.activeHonorModifiers?.length) return prev;
+        const alive = getActiveHonorModifiers(prev.activeHonorModifiers, now);
+        if (alive.length === prev.activeHonorModifiers.length) return prev;
+        return { ...prev, activeHonorModifiers: alive };
+      });
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [screen, hasActiveHonor]);
+
   const handleStartNewGame = (
     name: string,
     gender: Gender,
@@ -522,10 +546,14 @@ export default function App() {
       return;
     }
 
-    if (!opts?.skipEnergyCheck && player.energy < cfg.energyCost) {
+    const activeHonor = getActiveHonorModifiers(player.activeHonorModifiers);
+    const honorBonus = aggregateHonorBonuses(activeHonor);
+    const actualEnergyCost = Math.max(1, Math.round(cfg.energyCost * (1 - honorBonus.energyDiscountPct)));
+
+    if (!opts?.skipEnergyCheck && player.energy < actualEnergyCost) {
       triggerPushNotification(
         'Energía Baja',
-        `Necesitas ${cfg.energyCost} de energía. Prepara una comida en Nutrición o reclama Recompensas.`,
+        `Necesitas ${actualEnergyCost} de energía. Prepara una comida en Nutrición o reclama Recompensas.`,
         'Nutrición'
       );
       setActiveTab('nutrition');
@@ -537,7 +565,7 @@ export default function App() {
         prev
           ? {
               ...prev,
-              energy: Math.max(0, prev.energy - cfg.energyCost),
+              energy: Math.max(0, prev.energy - actualEnergyCost),
               lastEnergyTickAt: Date.now(),
             }
           : prev
@@ -549,7 +577,7 @@ export default function App() {
         ? opts.refundableEnergy
         : opts?.skipEnergyCheck
         ? 0
-        : cfg.energyCost;
+        : actualEnergyCost;
 
     sound.playTap();
     setActiveSession({
@@ -590,10 +618,14 @@ export default function App() {
       );
       return;
     }
-    if (player.energy < routine.energyCost) {
+    const activeHonor = getActiveHonorModifiers(player.activeHonorModifiers);
+    const honorBonus = aggregateHonorBonuses(activeHonor);
+    const actualEnergyCost = Math.max(1, Math.round(routine.energyCost * (1 - honorBonus.energyDiscountPct)));
+
+    if (player.energy < actualEnergyCost) {
       triggerPushNotification(
         'Energía Insuficiente',
-        `Esta rutina requiere ${routine.energyCost} de energía. Recarga en Nutrición.`,
+        `Esta rutina requiere ${actualEnergyCost} de energía. Recarga en Nutrición.`,
         'Nutrición'
       );
       setActiveTab('nutrition');
@@ -604,7 +636,7 @@ export default function App() {
       prev
         ? {
             ...prev,
-            energy: Math.max(0, prev.energy - routine.energyCost),
+            energy: Math.max(0, prev.energy - actualEnergyCost),
             lastEnergyTickAt: Date.now(),
           }
         : prev
@@ -614,7 +646,7 @@ export default function App() {
       routineId: routine.id,
       routineStepIdx: 0,
       skipEnergyCheck: true,
-      refundableEnergy: routine.energyCost,
+      refundableEnergy: actualEnergyCost,
     });
   };
 
@@ -629,6 +661,10 @@ export default function App() {
     );
     const performanceFactor = Math.max(0.55, Math.min(2.1, result.score / (950 * cfg.rewardMult)));
 
+    const now = Date.now();
+    const activeHonorMods = getActiveHonorModifiers(player.activeHonorModifiers, now);
+    const honorBonuses = aggregateHonorBonuses(activeHonorMods);
+
     const buffMuscle = player.activeBuff ? player.activeBuff.muscleMultiplier : 1;
     const buffFat = player.activeBuff ? player.activeBuff.fatBurnMultiplier : 1;
     const outfitSpec = OUTFITS[player.activeOutfit] || OUTFITS.basic;
@@ -640,6 +676,7 @@ export default function App() {
         performanceFactor *
         buffMuscle *
         outfitSpec.muscleMult *
+        honorBonuses.muscleMult *
         0.55
       ).toFixed(2)
     );
@@ -650,6 +687,7 @@ export default function App() {
         performanceFactor *
         buffFat *
         outfitSpec.fatMult *
+        honorBonuses.fatBurnMult *
         0.65
       ).toFixed(2)
     );
@@ -671,10 +709,56 @@ export default function App() {
       plays: (prevPb?.plays ?? 0) + 1,
     };
 
+    // Honor Medals & Temporary Passive Modifiers check
+    const earnedMedals = evaluateHonorMedals(result, accuracyPct);
+    const existingHonorMedals = { ...(player.honorMedals || {}) };
+    let nextActiveHonorMods = [...activeHonorMods];
+    let honorInstantEnergy = 0;
+    const honorMedalsEarnedSummary: NonNullable<SummaryData['honorMedalsEarned']> = [];
+
+    for (const medal of earnedMedals) {
+      const prevRec = existingHonorMedals[medal.id];
+      const isFirstUnlock = !prevRec;
+      existingHonorMedals[medal.id] = {
+        unlockedAt: prevRec?.unlockedAt ?? getLocalDateKey(),
+        timesEarned: (prevRec?.timesEarned ?? 0) + 1,
+        bestScore: Math.max(prevRec?.bestScore ?? 0, result.score),
+      };
+      nextActiveHonorMods = nextActiveHonorMods.filter((m) => m.medalId !== medal.id);
+      nextActiveHonorMods.push({
+        medalId: medal.id,
+        medalTitle: medal.title,
+        modifierName: medal.modifierName,
+        effectSummary: medal.effectSummary,
+        expiresAt: now + medal.durationMin * 60000,
+        durationMin: medal.durationMin,
+        muscleMult: medal.muscleMult,
+        fatBurnMult: medal.fatBurnMult,
+        xpMult: medal.xpMult,
+        coinMult: medal.coinMult,
+        leagueMult: medal.leagueMult,
+        energyDiscountPct: medal.energyDiscountPct,
+      });
+      if (medal.instantEnergyBonus) {
+        honorInstantEnergy += medal.instantEnergyBonus;
+      }
+      honorMedalsEarnedSummary.push({
+        id: medal.id,
+        title: medal.title,
+        isFirstUnlock,
+        modifierName: medal.modifierName,
+        effectSummary: medal.effectSummary,
+        durationMin: medal.durationMin,
+      });
+    }
+
     let coinsEarned =
-      Math.round((45 + result.score * 0.045) * cfg.rewardMult * outfitSpec.coinMult) + pbBonusCoins;
-    let xpEarned = Math.round((35 + result.score * 0.035) * cfg.rewardMult * outfitSpec.xpMult);
-    let weeklyAdd = Math.round(result.score * 0.45);
+      Math.round((45 + result.score * 0.045) * cfg.rewardMult * outfitSpec.coinMult * honorBonuses.coinMult) +
+      pbBonusCoins;
+    let xpEarned = Math.round(
+      (35 + result.score * 0.035) * cfg.rewardMult * outfitSpec.xpMult * honorBonuses.xpMult
+    );
+    let weeklyAdd = Math.round(result.score * 0.45 * honorBonuses.leagueMult);
 
     if (duelWon) {
       coinsEarned += 120;
@@ -744,7 +828,7 @@ export default function App() {
 
     // Free protein boost when playing Macro Catcher
     const bonusProtein = result.gameId === 'macros' ? 18 : 0;
-    const bonusEnergy = result.gameId === 'macros' ? 15 : 0;
+    const bonusEnergy = (result.gameId === 'macros' ? 15 : 0) + honorInstantEnergy;
 
     let updatedPlayer: PlayerStats = {
       ...player,
@@ -780,8 +864,10 @@ export default function App() {
         ...existingPbs,
         [result.gameId]: nextPb,
       },
+      honorMedals: existingHonorMedals,
+      activeHonorModifiers: nextActiveHonorMods,
       lastActiveDate: getLocalDateKey(),
-      lastEnergyTickAt: Date.now(),
+      lastEnergyTickAt: now,
       currentWeekKey: getIsoWeekKey(),
     };
 
@@ -807,6 +893,16 @@ export default function App() {
     }
 
     setPlayer(updatedPlayer);
+    if (honorMedalsEarnedSummary.length > 0) {
+      setHonorNowMs(now);
+      const firstHonor = honorMedalsEarnedSummary[0];
+      triggerPushNotification(
+        firstHonor.isFirstUnlock ? '¡Medalla de Honor Obtenida!' : '¡Modificador de Honor Activo!',
+        `${firstHonor.title}: ${firstHonor.modifierName} (${firstHonor.effectSummary}) por ${firstHonor.durationMin} min.`,
+        'Recompensa',
+        false
+      );
+    }
 
     const newPoint: ProgressPoint = {
       id: `pt_${Date.now()}`,
@@ -836,14 +932,16 @@ export default function App() {
     };
     setWorkouts((prev) => [newEntry, ...prev].slice(0, 20));
 
-    if (leveledUp) {
+    if (leveledUp || honorMedalsEarnedSummary.length > 0) {
       sound.playLevelUp();
-      triggerPushNotification(
-        `¡Nivel ${nextLevel} Alcanzado!`,
-        'Tu capacidad atlética crece. Revisa los nuevos niveles de dificultad desbloqueados.',
-        'Motivación',
-        false
-      );
+      if (leveledUp) {
+        triggerPushNotification(
+          `¡Nivel ${nextLevel} Alcanzado!`,
+          'Tu capacidad atlética crece. Revisa los nuevos niveles de dificultad desbloqueados.',
+          'Motivación',
+          false
+        );
+      }
     } else if (isNewRecord && prevBestScore > 0) {
       sound.playNewRecord();
     } else {
@@ -857,15 +955,17 @@ export default function App() {
         `Energía Cinética · ${routineCompletedBonus.title}`,
         true
       );
-    } else if (result.maxCombo >= 5) {
+    } else if (result.maxCombo >= 5 || honorMedalsEarnedSummary.length > 0) {
       triggerKineticEnergy(
         'combo',
-        `Energía Cinética · Combo Máximo x${result.maxCombo}`,
+        honorMedalsEarnedSummary.length > 0
+          ? `Energía Cinética · ${honorMedalsEarnedSummary[0].title}`
+          : `Energía Cinética · Combo Máximo x${result.maxCombo}`,
         hasRoutineDoneToday
       );
     }
 
-    if (leveledUp || duelWon || Boolean(routineCompletedBonus)) {
+    if (leveledUp || duelWon || Boolean(routineCompletedBonus) || honorMedalsEarnedSummary.length > 0) {
       setCelebrateFlex(true);
       if (flexTimerRef.current) window.clearTimeout(flexTimerRef.current);
       flexTimerRef.current = window.setTimeout(() => {
@@ -892,6 +992,7 @@ export default function App() {
       hasNextRoutineStep,
       routineCompletedBonus,
       unlockedAchievements: achBonuses.unlockedItems,
+      honorMedalsEarned: honorMedalsEarnedSummary,
     });
   };
 
@@ -1206,6 +1307,10 @@ export default function App() {
 
   const physiqueStage = getPhysiqueStage(player.fitnessScore);
   const xpPct = Math.min(100, Math.round((player.xp / player.xpToNext) * 100));
+  const activeHonorMods = getActiveHonorModifiers(player.activeHonorModifiers, honorNowMs);
+  const honorBonuses = aggregateHonorBonuses(activeHonorMods);
+  const effectiveEnergyCost = (baseCost: number) =>
+    Math.max(1, Math.round(baseCost * (1 - honorBonuses.energyDiscountPct)));
 
   return (
     <div className="min-h-screen text-white flex flex-col">
@@ -1375,6 +1480,7 @@ export default function App() {
                   hairColor: player.hairColor,
                   outfit: player.activeOutfit,
                 }}
+                aiModel={aiAthlete}
                 rivalTargetScore={activeSession.rivalTargetScore}
                 rivalName={activeSession.rivalName}
                 onComplete={handleMinigameComplete}
@@ -1391,6 +1497,7 @@ export default function App() {
                   hairColor: player.hairColor,
                   outfit: player.activeOutfit,
                 }}
+                aiModel={aiAthlete}
                 rivalTargetScore={activeSession.rivalTargetScore}
                 rivalName={activeSession.rivalName}
                 onComplete={handleMinigameComplete}
@@ -1425,6 +1532,7 @@ export default function App() {
                   hairColor: player.hairColor,
                   outfit: player.activeOutfit,
                 }}
+                aiModel={aiAthlete}
                 rivalTargetScore={activeSession.rivalTargetScore}
                 rivalName={activeSession.rivalName}
                 onComplete={handleMinigameComplete}
@@ -1441,6 +1549,7 @@ export default function App() {
                   hairColor: player.hairColor,
                   outfit: player.activeOutfit,
                 }}
+                aiModel={aiAthlete}
                 rivalTargetScore={activeSession.rivalTargetScore}
                 rivalName={activeSession.rivalName}
                 onComplete={handleMinigameComplete}
@@ -1457,6 +1566,7 @@ export default function App() {
                   hairColor: player.hairColor,
                   outfit: player.activeOutfit,
                 }}
+                aiModel={aiAthlete}
                 rivalTargetScore={activeSession.rivalTargetScore}
                 rivalName={activeSession.rivalName}
                 onComplete={handleMinigameComplete}
@@ -1558,6 +1668,14 @@ export default function App() {
                         </div>
                       ))}
                     </div>
+
+                    {/* Honor Medals & Active Passive Modifiers Showcase */}
+                    <HonorMedalsShowcase
+                      player={player}
+                      nowMs={honorNowMs}
+                      variant="compact"
+                      onInspectAll={() => setActiveTab('progress')}
+                    />
 
                     {/* Wardrobe / Outfits */}
                     <div className="mt-4">
@@ -1663,7 +1781,7 @@ export default function App() {
                                     {r.minigameOrder.length} estaciones · Nv. {r.levelRequired}+
                                   </span>
                                   <span className="font-mono-tabular font-semibold text-orange-500">
-                                    -{r.energyCost} Energía
+                                    -{effectiveEnergyCost(r.energyCost)} Energía
                                   </span>
                                 </div>
                                 <h4 className="font-display uppercase italic font-black text-xl leading-tight text-white mt-1.5">{r.title}</h4>
@@ -1728,7 +1846,7 @@ export default function App() {
                           index={i}
                           game={game}
                           meta={cfg.label}
-                          energyCost={cfg.energyCost}
+                          energyCost={effectiveEnergyCost(cfg.energyCost)}
                           bestScore={player.personalBests?.[game.id]?.bestScore}
                           onPlay={() => launchMinigame(game.id, selectedDifficulty)}
                         />
@@ -1802,7 +1920,7 @@ export default function App() {
                         variant="full"
                         game={game}
                         meta={cfg.label}
-                        energyCost={cfg.energyCost}
+                        energyCost={effectiveEnergyCost(cfg.energyCost)}
                         kcal={Math.round(game.baseCalories * cfg.rewardMult)}
                         bestScore={player.personalBests?.[game.id]?.bestScore}
                         onPlay={() => launchMinigame(game.id, selectedDifficulty)}
@@ -1829,6 +1947,7 @@ export default function App() {
                 history={history}
                 workouts={workouts}
                 unlockedAchievementIds={unlockedAchievements}
+                nowMs={honorNowMs}
                 aiAthlete={aiAthlete}
                 onChangeAiAthlete={handleChangeAiAthlete}
               />

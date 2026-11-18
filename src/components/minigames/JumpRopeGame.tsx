@@ -17,10 +17,13 @@ import {
 } from '../../three/threeUtils';
 
 import { AthleteBuildOptions, buildAthleteModel } from '../../three/buildAthleteModel';
+import { GlbPoseRig, loadMinigameGlbAthlete } from '../../three/buildGlbAthlete';
+import { buildContinuousRopeChain, updateRopeChain } from '../../three/gymProps';
 
 interface JumpRopeGameProps {
   difficulty: DifficultyLevel;
   athlete?: Omit<AthleteBuildOptions, 'pose' | 'hasBuff'>;
+  aiModel?: boolean;
   rivalTargetScore?: number;
   rivalName?: string;
   onComplete: (result: MinigameResult) => void;
@@ -33,6 +36,7 @@ const ROPE_SEGMENTS = 28;
 export const JumpRopeGame: React.FC<JumpRopeGameProps> = ({
   difficulty,
   athlete,
+  aiModel = true,
   rivalTargetScore,
   rivalName,
   onComplete,
@@ -59,6 +63,7 @@ export const JumpRopeGame: React.FC<JumpRopeGameProps> = ({
   const ropeAngleRef = useRef(Math.PI * 0.85);
   const jumpHeightRef = useRef(0);
   const jumpVelRef = useRef(0);
+  const tripStumbleRef = useRef(0);
   const jumpScoredThisCycleRef = useRef(false);
   const missedCheckedThisCycleRef = useRef(false);
 
@@ -80,10 +85,10 @@ export const JumpRopeGame: React.FC<JumpRopeGameProps> = ({
 
   const triggerJump = useCallback(() => {
     if (completedRef.current) return;
-    // Allow jump if close to ground
-    if (jumpHeightRef.current > 0.18) return;
+    // Allow snappy re-jump near landing
+    if (jumpHeightRef.current > 0.12) return;
 
-    jumpVelRef.current = 5.4;
+    jumpVelRef.current = 3.85;
     actionsRef.current += 1;
 
     // Bottom sweep angle is around Math.PI / 2 (sin(angle) === 1 -> y lowest)
@@ -172,12 +177,12 @@ export const JumpRopeGame: React.FC<JumpRopeGameProps> = ({
     floor.receiveShadow = true;
     scene.add(floor);
 
-    // Jump Mat & Timing Halo Ring
+    // Raised Plyometric Circular Jump Platform & Timing Halo Ring
     const matMesh = new THREE.Mesh(
-      new THREE.CylinderGeometry(1.15, 1.2, 0.04, 36),
-      new THREE.MeshStandardMaterial({ color: 0x1c1c1c, roughness: 0.75 })
+      new THREE.CylinderGeometry(1.16, 1.24, 0.055, 42),
+      new THREE.MeshStandardMaterial({ color: 0x161920, roughness: 0.75, metalness: 0.12 })
     );
-    matMesh.position.y = 0.02;
+    matMesh.position.y = 0.025;
     matMesh.receiveShadow = true;
     scene.add(matMesh);
 
@@ -187,9 +192,9 @@ export const JumpRopeGame: React.FC<JumpRopeGameProps> = ({
       emissiveIntensity: 0.35,
       roughness: 0.25,
     });
-    const timingRing = new THREE.Mesh(new THREE.TorusGeometry(0.95, 0.035, 12, 48), ringMat);
+    const timingRing = new THREE.Mesh(new THREE.TorusGeometry(0.95, 0.036, 12, 48), ringMat);
     timingRing.rotation.x = Math.PI / 2;
-    timingRing.position.y = 0.05;
+    timingRing.position.y = 0.058;
     scene.add(timingRing);
 
     // Full Sculpted Athlete Jumping Rope
@@ -200,39 +205,88 @@ export const JumpRopeGame: React.FC<JumpRopeGameProps> = ({
       hairColor: athlete?.hairColor ?? '#1C1C1C',
       outfit: athlete?.outfit ?? 'runner',
     });
-    jumper.root.position.set(0, 0.04, 0);
-    jumper.leftArmPivot.rotation.z = -0.36;
-    jumper.rightArmPivot.rotation.z = 0.36;
-    jumper.leftForearmPivot.rotation.x = -1.05;
-    jumper.rightForearmPivot.rotation.x = -1.05;
+    jumper.root.position.set(0, 0.05, 0);
+    jumper.leftArmPivot.rotation.z = -0.42;
+    jumper.rightArmPivot.rotation.z = 0.42;
+    jumper.leftForearmPivot.rotation.x = -0.82;
+    jumper.rightForearmPivot.rotation.x = -0.82;
     scene.add(jumper.root);
 
-    // Speed-Rope Handles held by athlete's hands
-    const handleMat = new THREE.MeshStandardMaterial({ color: 0xff5a1f, roughness: 0.3, metalness: 0.5 });
-    const handleGeo = new THREE.CylinderGeometry(0.024, 0.024, 0.18, 12);
-    const leftHandle = new THREE.Mesh(handleGeo, handleMat);
-    leftHandle.position.set(-0.46, 0.98, 0.16);
-    leftHandle.rotation.z = Math.PI / 2.2;
-    const rightHandle = new THREE.Mesh(handleGeo, handleMat);
-    rightHandle.position.set(0.46, 0.98, 0.16);
-    rightHandle.rotation.z = -Math.PI / 2.2;
-    scene.add(leftHandle, rightHandle);
+    // Ergonomic Anodized Speed-Rope Handles attached directly to the athlete's palms
+    const handleMat = new THREE.MeshPhysicalMaterial({ color: 0xff5a1f, roughness: 0.26, metalness: 0.72 });
+    const gripBandMat = new THREE.MeshStandardMaterial({ color: 0x0f172a, roughness: 0.85 });
+    const swivelMat = new THREE.MeshPhysicalMaterial({ color: 0xe2e8f0, metalness: 0.94, roughness: 0.14 });
+    const buildSpeedHandle = (dirSign: number) => {
+      const hGrp = new THREE.Group();
+      // Grip centered in palm, swivel tip extending outward laterally
+      const body = new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.025, 0.17, 14), handleMat);
+      body.rotation.z = Math.PI / 2;
+      body.position.x = dirSign * 0.03;
+      const foam = new THREE.Mesh(new THREE.CylinderGeometry(0.027, 0.027, 0.09, 14), gripBandMat);
+      foam.rotation.z = Math.PI / 2;
+      const tip = new THREE.Mesh(new THREE.SphereGeometry(0.022, 10, 10), swivelMat);
+      tip.position.set(dirSign * 0.115, 0, 0);
+      const swivelAnchor = new THREE.Object3D();
+      swivelAnchor.position.set(dirSign * 0.125, 0, 0);
+      hGrp.add(body, foam, tip, swivelAnchor);
+      hGrp.position.set(0, -0.295, 0.018);
+      hGrp.rotation.y = -dirSign * 0.18;
+      return { hGrp, swivelAnchor };
+    };
+    const leftHandleRig = buildSpeedHandle(-1);
+    const rightHandleRig = buildSpeedHandle(1);
+    jumper.leftForearmPivot.add(leftHandleRig.hGrp);
+    jumper.rightForearmPivot.add(rightHandleRig.hGrp);
 
-    // Pre-allocated 3D Rope Link Beads (Zero GC inside tick)
-    const ropeBeads: THREE.Mesh[] = [];
-    const beadGeo = new THREE.SphereGeometry(0.028, 10, 10);
-    const beadMat = new THREE.MeshStandardMaterial({
+    let glbJumper: GlbPoseRig | null = null;
+    loadMinigameGlbAthlete({
+      scene,
+      gender: athlete?.gender ?? 'male',
+      fitnessScore: athlete?.fitnessScore ?? 65,
+      outfit: athlete?.outfit ?? 'runner',
+      aiModel,
+      isCancelled: () => unmounted,
+      onLoaded: (rig) => {
+        rig.root.position.set(0, 0.05, 0);
+        rig.poseJumpRope(0, 0, Math.sin(ropeAngleRef.current), Math.cos(ropeAngleRef.current), 0, 0.05);
+        scene.add(rig.root);
+        // Move speed-rope handles to scene space (scale 1.0) synced directly to GLB wrists
+        leftHandleRig.hGrp.position.set(0, 0, 0);
+        rightHandleRig.hGrp.position.set(0, 0, 0);
+        scene.add(leftHandleRig.hGrp, rightHandleRig.hGrp);
+        glbJumper = rig;
+        jumper.root.visible = false;
+      },
+    });
+
+    // Measure exact rest hand-swivel height so rope sweeps cleanly across the mat
+    const leftTipPos = new THREE.Vector3();
+    const rightTipPos = new THREE.Vector3();
+    jumper.root.updateMatrixWorld(true);
+    leftHandleRig.swivelAnchor.getWorldPosition(leftTipPos);
+    rightHandleRig.swivelAnchor.getWorldPosition(rightTipPos);
+    const restRopeRadiusY = Math.max(0.92, (leftTipPos.y + rightTipPos.y) * 0.5 - 0.06);
+
+    // Pre-allocated Continuous Glowing Speed-Cable Segments (Zero GC inside tick)
+    const ropeMat = new THREE.MeshStandardMaterial({
       color: 0xfbbf24,
       emissive: 0xf59e0b,
+      emissiveIntensity: 0.45,
+      roughness: 0.28,
+      metalness: 0.2,
+    });
+    const ropeStripeMat = new THREE.MeshStandardMaterial({
+      color: 0xff5a1f,
+      emissive: 0xff5a1f,
       emissiveIntensity: 0.55,
       roughness: 0.25,
     });
-    for (let i = 0; i < ROPE_SEGMENTS; i++) {
-      const bead = new THREE.Mesh(beadGeo, beadMat);
-      bead.castShadow = true;
-      scene.add(bead);
-      ropeBeads.push(bead);
-    }
+    const ropeSegments = buildContinuousRopeChain(ROPE_SEGMENTS - 1, 0.017, ropeMat, ropeStripeMat, 4);
+    ropeSegments.forEach((seg) => scene.add(seg));
+
+    const ropePoints = Array.from({ length: ROPE_SEGMENTS }, () => new THREE.Vector3());
+    const tmpMid = new THREE.Vector3();
+    const tmpDir = new THREE.Vector3();
 
     const resizeObserver = new ResizeObserver(() => {
       if (!container) return;
@@ -266,10 +320,14 @@ export const JumpRopeGame: React.FC<JumpRopeGameProps> = ({
         return;
       }
 
-      // Spin speed scales cleanly with difficulty & turbo streak
+      // Spin speed scales cleanly with difficulty, turbo streak & brief snag deceleration on trip
+      if (tripStumbleRef.current > 0) {
+        tripStumbleRef.current = Math.max(0, tripStumbleRef.current - dt);
+      }
       const prevAngle = ropeAngleRef.current;
       const turboFactor = comboRef.current >= 5 ? 1.18 : 1.0;
-      const angularSpeed = (3.4 + (difficulty - 1) * 0.45) * turboFactor;
+      const snagSlow = tripStumbleRef.current > 0 ? 0.35 : 1.0;
+      const angularSpeed = (3.4 + (difficulty - 1) * 0.45) * turboFactor * snagSlow;
       ropeAngleRef.current += angularSpeed * dt;
 
       const prevMod = ((prevAngle % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2);
@@ -285,9 +343,10 @@ export const JumpRopeGame: React.FC<JumpRopeGameProps> = ({
       const tripCheckAngle = Math.PI * 0.5 + Math.max(0.35, 0.55 * cfg.windowMult);
       if (!missedCheckedThisCycleRef.current && prevMod < tripCheckAngle && curMod >= tripCheckAngle) {
         missedCheckedThisCycleRef.current = true;
-        if (jumpHeightRef.current < 0.08 && !jumpScoredThisCycleRef.current) {
+        if (jumpHeightRef.current < 0.06 && !jumpScoredThisCycleRef.current) {
           comboRef.current = 0;
           actionsRef.current += 1;
+          tripStumbleRef.current = 0.26;
           setCombo(0);
           setTurboActive(false);
           setFeedback('¡La cuerda tocó tus pies! Salta a tiempo');
@@ -295,49 +354,91 @@ export const JumpRopeGame: React.FC<JumpRopeGameProps> = ({
         }
       }
 
-      // Athlete jump gravity physics
+      // Athletic quick-hop pogo gravity physics (crisp ~0.34m peak + tucked knees)
       if (jumpHeightRef.current > 0 || jumpVelRef.current > 0) {
         jumpHeightRef.current += jumpVelRef.current * dt;
-        jumpVelRef.current -= 18.5 * dt;
+        jumpVelRef.current -= 22.0 * dt;
         if (jumpHeightRef.current <= 0) {
           jumpHeightRef.current = 0;
           jumpVelRef.current = 0;
         }
       }
-      jumper.root.position.y = 0.04 + jumpHeightRef.current;
-      const jumpNorm = THREE.MathUtils.clamp(jumpHeightRef.current / 0.72, 0, 1);
-      jumper.leftLegPivot.rotation.x = -jumpNorm * 0.35;
-      jumper.rightLegPivot.rotation.x = -jumpNorm * 0.35;
-      jumper.leftKneePivot.rotation.x = jumpNorm * 0.75;
-      jumper.rightKneePivot.rotation.x = jumpNorm * 0.75;
-      jumper.shadowMesh.scale.setScalar(Math.max(0.5, 1 - jumpNorm * 0.45));
+      const jumpNorm = THREE.MathUtils.clamp(jumpHeightRef.current / 0.34, 0, 1);
 
-      // Rotate forearms subtly as hands spin the handles
+      // Orbit forearms subtly in a wrist circle synchronized with the turning rope
       const angle = ropeAngleRef.current;
       const sinA = Math.sin(angle);
       const cosA = Math.cos(angle);
-      jumper.leftForearmPivot.rotation.x = -1.05 + sinA * 0.16;
-      jumper.rightForearmPivot.rotation.x = -1.05 + sinA * 0.16;
-      if (jumper.ponytailGroup) {
-        jumper.ponytailGroup.rotation.x = 0.18 + jumpNorm * 0.38;
+      const stumbleFactor = tripStumbleRef.current > 0 ? Math.sin(tripStumbleRef.current * 24) : 0;
+
+      if (glbJumper) {
+        glbJumper.poseJumpRope(jumpNorm, jumpHeightRef.current, sinA, cosA, stumbleFactor, 0.05);
+        // Athlete faces +Z: RightHand is on viewer-left (-X), LeftHand is on viewer-right (+X)
+        if (glbJumper.bones.rightHand && glbJumper.bones.leftHand) {
+          glbJumper.bones.rightHand.getWorldPosition(leftHandleRig.hGrp.position);
+          glbJumper.bones.leftHand.getWorldPosition(rightHandleRig.hGrp.position);
+          leftHandleRig.hGrp.rotation.set(sinA * 0.14, 0.18, cosA * 0.12);
+          rightHandleRig.hGrp.rotation.set(sinA * 0.14, -0.18, -cosA * 0.12);
+        }
+        leftHandleRig.hGrp.updateMatrixWorld(true);
+        rightHandleRig.hGrp.updateMatrixWorld(true);
+      } else {
+        jumper.root.position.y = 0.05 + jumpHeightRef.current;
+        jumper.leftLegPivot.rotation.x = -jumpNorm * 0.45;
+        jumper.rightLegPivot.rotation.x = -jumpNorm * 0.45;
+        jumper.leftKneePivot.rotation.x = jumpNorm * 0.95;
+        jumper.rightKneePivot.rotation.x = jumpNorm * 0.95;
+        jumper.shadowMesh.scale.setScalar(Math.max(0.5, 1 - jumpNorm * 0.4));
+
+        jumper.leftArmPivot.rotation.z = -0.42 - jumpNorm * 0.06;
+        jumper.rightArmPivot.rotation.z = 0.42 + jumpNorm * 0.06;
+        jumper.leftForearmPivot.rotation.x = -0.82 + sinA * 0.11 + jumpNorm * 0.24;
+        jumper.rightForearmPivot.rotation.x = -0.82 + sinA * 0.11 + jumpNorm * 0.24;
+        jumper.leftForearmPivot.rotation.z = -cosA * 0.08;
+        jumper.rightForearmPivot.rotation.z = cosA * 0.08;
+        jumper.upperBody.rotation.x = 0.04 + stumbleFactor * 0.14;
+        if (jumper.ponytailGroup) {
+          jumper.ponytailGroup.rotation.x = 0.18 + jumpNorm * 0.38;
+        }
+        jumper.root.updateMatrixWorld(true);
       }
 
-      const handY = 0.98 + jumpHeightRef.current + sinA * 0.03;
-      leftHandle.position.set(-0.46, handY, 0.16);
-      rightHandle.position.set(0.46, handY, 0.16);
+      // Query exact world coordinates of both handle swivel tips so rope NEVER detaches
+      leftHandleRig.swivelAnchor.getWorldPosition(leftTipPos);
+      rightHandleRig.swivelAnchor.getWorldPosition(rightTipPos);
 
-      // Update rope bead arc around the full athlete (angle PI/2 = bottom floor sweep)
-      const radiusDrop = 0.96;
-      const archCenterY = 1.01 + jumpHeightRef.current * 0.25;
+      // Physical catenary + centrifugal drag lag + mat floor brush
+      const dragLag = comboRef.current >= 5 ? 0.22 : 0.15;
+      const snagDip = tripStumbleRef.current > 0 ? Math.sin(tripStumbleRef.current * 28) * 0.12 : 0;
+      const radialArcY = restRopeRadiusY + snagDip;
+      const radialArcZ = 1.08;
+      const matTopY = 0.068;
 
       for (let i = 0; i < ROPE_SEGMENTS; i++) {
         const t = i / (ROPE_SEGMENTS - 1);
-        const x = THREE.MathUtils.lerp(-0.48, 0.48, t) + Math.sin(t * Math.PI) * 0.24 * (t < 0.5 ? -1 : 1);
-        const arch = Math.sin(t * Math.PI);
-        const y = archCenterY - arch * radiusDrop * sinA + arch * 0.95 * (sinA < 0 ? -sinA * 0.28 : 0);
-        const z = 0.12 + arch * 1.15 * cosA;
-        ropeBeads[i].position.set(x, Math.max(0.04, y), z);
+        const arch = Math.pow(Math.sin(Math.PI * t), 0.72);
+        const effAngle = angle - dragLag * arch;
+        const effSin = Math.sin(effAngle);
+        const effCos = Math.cos(effAngle);
+
+        const baseX = THREE.MathUtils.lerp(leftTipPos.x, rightTipPos.x, t);
+        const baseY = THREE.MathUtils.lerp(leftTipPos.y, rightTipPos.y, t);
+        const baseZ = THREE.MathUtils.lerp(leftTipPos.z, rightTipPos.z, t);
+
+        // Smooth C-infinity lateral bow (no discontinuity at center)
+        const lateralFlare = -Math.sin(Math.PI * 2 * t) * 0.075;
+        const x = baseX + lateralFlare;
+        const rawY = baseY - arch * radialArcY * effSin;
+        const y = rawY < matTopY ? matTopY + (rawY - matTopY) * 0.04 : rawY;
+        const clampedY = Math.max(matTopY, y);
+        const z = baseZ + arch * radialArcZ * effCos;
+
+        ropePoints[i].set(x, clampedY, z);
       }
+      // Guarantee exact 0-gap anchor at handle tips
+      ropePoints[0].copy(leftTipPos);
+      ropePoints[ROPE_SEGMENTS - 1].copy(rightTipPos);
+      updateRopeChain(ropeSegments, ropePoints, tmpMid, tmpDir);
 
       // Glow timing ring brightly as rope approaches bottom sweep
       const distBottom = Math.abs(curMod - Math.PI * 0.5);

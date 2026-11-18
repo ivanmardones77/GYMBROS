@@ -7,6 +7,7 @@ import {
 } from '../types/game';
 import { ACHIEVEMENTS, MINIGAMES, getPhysiqueStage } from '../data/gameData';
 import { Athlete3DViewer } from './Athlete3DViewer';
+import { HonorMedalsShowcase } from './HonorMedalsStrip';
 import { Award, CheckCircle2, TrendingUp, Trophy } from 'lucide-react';
 
 interface ProgressDashboardProps {
@@ -14,6 +15,7 @@ interface ProgressDashboardProps {
   history: ProgressPoint[];
   workouts: WorkoutHistoryEntry[];
   unlockedAchievementIds: string[];
+  nowMs?: number;
   aiAthlete?: boolean;
   onChangeAiAthlete?: (ai: boolean) => void;
 }
@@ -35,6 +37,7 @@ export const ProgressDashboard: React.FC<ProgressDashboardProps> = ({
   history,
   workouts,
   unlockedAchievementIds,
+  nowMs,
   aiAthlete = true,
   onChangeAiAthlete,
 }) => {
@@ -418,6 +421,9 @@ export const ProgressDashboard: React.FC<ProgressDashboardProps> = ({
           })}
         </div>
       </div>
+
+      {/* Section 1.75: Honor Medals & Timed Passive Modifiers */}
+      <HonorMedalsShowcase player={player} nowMs={nowMs} variant="full" />
 
       {/* Section 2: Achievements System */}
       <div>

@@ -1,5 +1,7 @@
 import React from 'react';
-import { Award, CheckCircle2, Flame, Trophy } from 'lucide-react';
+import { Award, CheckCircle2, Flame, Shield, Trophy } from 'lucide-react';
+import { HonorMedalId } from '../types/game';
+import { HonorMedalCrest } from './HonorMedalsStrip';
 
 export interface UnlockedAchievementSummary {
   id: string;
@@ -31,6 +33,14 @@ export interface SummaryData {
     muscle: number;
   } | null;
   unlockedAchievements?: UnlockedAchievementSummary[];
+  honorMedalsEarned?: {
+    id: HonorMedalId;
+    title: string;
+    isFirstUnlock: boolean;
+    modifierName: string;
+    effectSummary: string;
+    durationMin: number;
+  }[];
 }
 
 interface RoundSummaryModalProps {
@@ -75,11 +85,13 @@ export const RoundSummaryModal: React.FC<RoundSummaryModalProps> = ({
   onNextRoutineStep,
 }) => {
   const unlockedList = summary.unlockedAchievements ?? [];
+  const honorList = summary.honorMedalsEarned ?? [];
   const hasNewAchievement = unlockedList.length > 0;
+  const hasCelebration = hasNewAchievement || honorList.length > 0;
 
   return (
     <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4 overflow-hidden">
-      {hasNewAchievement && (
+      {hasCelebration && (
         <div className="fixed inset-0 pointer-events-none z-50 overflow-hidden" aria-hidden="true">
           {CONFETTI_PIECES.map((piece) => (
             <span
@@ -121,6 +133,30 @@ export const RoundSummaryModal: React.FC<RoundSummaryModalProps> = ({
             </div>
           )}
         </div>
+
+        {honorList.length > 0 && (
+          <div className="mt-4 p-3.5 bg-emerald-500/12 border border-emerald-400/45 rounded-xl text-xs text-emerald-100 space-y-2">
+            <div className="font-bold flex items-center gap-1.5 text-emerald-300">
+              <Shield className="w-4 h-4 text-emerald-400 shrink-0" />
+              {honorList.some((m) => m.isFirstUnlock)
+                ? '¡Medalla de Honor Grabada en tu Perfil!'
+                : '¡Modificador de Honor Reactivado!'}
+            </div>
+            {honorList.map((m) => (
+              <div key={m.id} className="flex items-center gap-2.5 pt-1 border-t border-emerald-500/20">
+                <HonorMedalCrest medalId={m.id} unlocked={true} active={true} size="sm" />
+                <div className="min-w-0 flex-1">
+                  <div className="font-semibold text-white truncate">
+                    {m.title} · <span className="text-emerald-300">{m.modifierName}</span>
+                  </div>
+                  <div className="text-[11px] text-emerald-200/85">
+                    {m.effectSummary} ({m.durationMin} min activo)
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
 
         {hasNewAchievement && (
           <div className="mt-4 p-3.5 bg-amber-500/10 border border-amber-400/40 rounded-xl text-xs text-amber-200">

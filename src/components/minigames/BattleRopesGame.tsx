@@ -17,10 +17,13 @@ import {
 } from '../../three/threeUtils';
 
 import { AthleteBuildOptions, buildAthleteModel } from '../../three/buildAthleteModel';
+import { GlbPoseRig, loadMinigameGlbAthlete } from '../../three/buildGlbAthlete';
+import { buildContinuousRopeChain, updateRopeChain } from '../../three/gymProps';
 
 interface BattleRopesGameProps {
   difficulty: DifficultyLevel;
   athlete?: Omit<AthleteBuildOptions, 'pose' | 'hasBuff'>;
+  aiModel?: boolean;
   rivalTargetScore?: number;
   rivalName?: string;
   onComplete: (result: MinigameResult) => void;
@@ -28,11 +31,12 @@ interface BattleRopesGameProps {
 }
 
 const DURATION_SEC = 24;
-const ROPE_NODES = 18;
+const ROPE_NODES = 24;
 
 export const BattleRopesGame: React.FC<BattleRopesGameProps> = ({
   difficulty,
   athlete,
+  aiModel = true,
   rivalTargetScore,
   rivalName,
   onComplete,
@@ -215,12 +219,40 @@ export const BattleRopesGame: React.FC<BattleRopesGameProps> = ({
     floor.receiveShadow = true;
     scene.add(floor);
 
-    // Steel Anchor Pillar at far end (z = -3.6)
-    const steelMat = new THREE.MeshStandardMaterial({ color: 0x3a3a3a, metalness: 0.85, roughness: 0.25 });
-    const anchorBase = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.34, 0.55, 24), steelMat);
-    anchorBase.position.set(0, 0.27, -3.6);
-    anchorBase.castShadow = true;
-    scene.add(anchorBase);
+    // Weighted Steel Battle-Rope Anchor Sled at far end (z = -3.6)
+    const steelMat = new THREE.MeshStandardMaterial({ color: 0x262a33, metalness: 0.85, roughness: 0.28 });
+    const chromeMat = new THREE.MeshPhysicalMaterial({ color: 0xe2e8f0, metalness: 0.94, roughness: 0.16 });
+    const sledGroup = new THREE.Group();
+    sledGroup.position.set(0, 0, -3.6);
+
+    const sledPlate = new THREE.Mesh(new THREE.BoxGeometry(0.92, 0.08, 0.72), steelMat);
+    sledPlate.position.y = 0.04;
+    sledPlate.castShadow = true;
+    sledPlate.receiveShadow = true;
+    sledGroup.add(sledPlate);
+
+    const plateColors = [0xff5a1f, 0x0284c7];
+    for (const side of [-0.26, 0.26]) {
+      const horn = new THREE.Mesh(new THREE.CylinderGeometry(0.024, 0.024, 0.48, 12), chromeMat);
+      horn.position.set(side, 0.3, -0.06);
+      sledGroup.add(horn);
+
+      for (let p = 0; p < 2; p++) {
+        const disc = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.2 - p * 0.025, 0.2 - p * 0.025, 0.05, 22),
+          new THREE.MeshStandardMaterial({ color: plateColors[p], roughness: 0.45, metalness: 0.16 })
+        );
+        disc.position.set(side, 0.11 + p * 0.058, -0.06);
+        disc.castShadow = true;
+        sledGroup.add(disc);
+      }
+
+      // Steel anchor shackle facing athlete
+      const shackle = new THREE.Mesh(new THREE.TorusGeometry(0.065, 0.016, 10, 20), chromeMat);
+      shackle.position.set(side * 0.54, 0.24, 0.22);
+      sledGroup.add(shackle);
+    }
+    scene.add(sledGroup);
 
     const anchorRingMat = new THREE.MeshStandardMaterial({
       color: 0xff6a2b,
@@ -228,9 +260,9 @@ export const BattleRopesGame: React.FC<BattleRopesGameProps> = ({
       emissiveIntensity: 0.5,
       roughness: 0.25,
     });
-    const anchorRing = new THREE.Mesh(new THREE.TorusGeometry(0.42, 0.04, 12, 36), anchorRingMat);
+    const anchorRing = new THREE.Mesh(new THREE.TorusGeometry(0.62, 0.036, 12, 40), anchorRingMat);
     anchorRing.rotation.x = Math.PI / 2;
-    anchorRing.position.set(0, 0.05, -3.6);
+    anchorRing.position.set(0, 0.04, -3.6);
     scene.add(anchorRing);
 
     // Sculpted Athlete in athletic battle-rope half-squat stance
@@ -256,25 +288,46 @@ export const BattleRopesGame: React.FC<BattleRopesGameProps> = ({
     fighter.rightForearmPivot.rotation.x = -0.55;
     scene.add(fighter.root);
 
-    // Pre-allocated 3D Rope Nodes for Left and Right Battle Ropes
-    const ropeMatLeft = new THREE.MeshStandardMaterial({ color: 0x1c1c1c, roughness: 0.72 });
-    const ropeMatRight = new THREE.MeshStandardMaterial({ color: 0x1c1c1c, roughness: 0.72 });
-    const stripeMat = new THREE.MeshStandardMaterial({ color: 0xff5a1f, roughness: 0.4 });
-    const nodeGeo = new THREE.SphereGeometry(0.068, 12, 12);
+    let glbFighter: GlbPoseRig | null = null;
+    const glbLeftHandPos = new THREE.Vector3(-0.38, 0.92, 1.75);
+    const glbRightHandPos = new THREE.Vector3(0.38, 0.92, 1.75);
+    loadMinigameGlbAthlete({
+      scene,
+      gender: athlete?.gender ?? 'male',
+      fitnessScore: athlete?.fitnessScore ?? 65,
+      outfit: athlete?.outfit ?? 'pro',
+      aiModel,
+      isCancelled: () => unmounted,
+      onLoaded: (rig) => {
+        rig.root.position.set(0, 0, 2.25);
+        rig.root.rotation.y = Math.PI;
+        rig.poseBattleRopes(0, 0, 0);
+        scene.add(rig.root);
+        glbFighter = rig;
+        fighter.root.visible = false;
+      },
+    });
 
-    const leftNodes: THREE.Mesh[] = [];
-    const rightNodes: THREE.Mesh[] = [];
-    for (let i = 0; i < ROPE_NODES; i++) {
-      const matL = i % 4 === 0 ? stripeMat : ropeMatLeft;
-      const matR = i % 4 === 0 ? stripeMat : ropeMatRight;
-      const nL = new THREE.Mesh(nodeGeo, matL);
-      nL.castShadow = true;
-      const nR = new THREE.Mesh(nodeGeo, matR);
-      nR.castShadow = true;
-      scene.add(nL, nR);
-      leftNodes.push(nL);
-      rightNodes.push(nR);
-    }
+    // Pre-allocated Continuous Braided 3D Battle Ropes + Heat-Shrink Hand Grips (Zero GC)
+    const ropeMat = new THREE.MeshStandardMaterial({ color: 0x1a1d24, roughness: 0.74, metalness: 0.08 });
+    const stripeMat = new THREE.MeshStandardMaterial({ color: 0xff5a1f, roughness: 0.42, metalness: 0.14 });
+    const gripMat = new THREE.MeshStandardMaterial({ color: 0x0f172a, roughness: 0.55, metalness: 0.2 });
+
+    const leftRopeSegs = buildContinuousRopeChain(ROPE_NODES - 1, 0.052, ropeMat, stripeMat, 3);
+    const rightRopeSegs = buildContinuousRopeChain(ROPE_NODES - 1, 0.052, ropeMat, stripeMat, 3);
+    leftRopeSegs.forEach((s) => scene.add(s));
+    rightRopeSegs.forEach((s) => scene.add(s));
+
+    const gripGeo = new THREE.CylinderGeometry(0.058, 0.058, 0.28, 14);
+    gripGeo.rotateX(Math.PI / 2);
+    const leftGrip = new THREE.Mesh(gripGeo, gripMat);
+    const rightGrip = new THREE.Mesh(gripGeo, gripMat);
+    scene.add(leftGrip, rightGrip);
+
+    const leftPoints = Array.from({ length: ROPE_NODES }, () => new THREE.Vector3());
+    const rightPoints = Array.from({ length: ROPE_NODES }, () => new THREE.Vector3());
+    const tmpMid = new THREE.Vector3();
+    const tmpDir = new THREE.Vector3();
 
     const resizeObserver = new ResizeObserver(() => {
       if (!container) return;
@@ -317,23 +370,52 @@ export const BattleRopesGame: React.FC<BattleRopesGameProps> = ({
       // Pump athlete's arms vigorously with rope waves
       const leftHandWave = Math.sin(leftPhaseRef.current) * leftWaveAmpRef.current;
       const rightHandWave = Math.sin(rightPhaseRef.current) * rightWaveAmpRef.current;
-      fighter.leftArmPivot.rotation.x = -0.78 + leftHandWave * 0.55;
-      fighter.rightArmPivot.rotation.x = -0.78 + rightHandWave * 0.55;
+      let startLx = -0.38;
+      let startLy = 0.92 + leftHandWave * 0.14;
+      let startLz = 1.75;
+      let startRx = 0.38;
+      let startRy = 0.92 + rightHandWave * 0.14;
+      let startRz = 1.75;
+
+      if (glbFighter) {
+        glbFighter.poseBattleRopes(leftHandWave, rightHandWave, 0);
+        if (glbFighter.bones.leftHand && glbFighter.bones.rightHand) {
+          // Athlete faces -Z: anatomical LeftHand is on -X, RightHand is on +X
+          glbFighter.bones.leftHand.getWorldPosition(glbLeftHandPos);
+          glbFighter.bones.rightHand.getWorldPosition(glbRightHandPos);
+          startLx = glbLeftHandPos.x;
+          startLy = glbLeftHandPos.y;
+          startLz = glbLeftHandPos.z;
+          startRx = glbRightHandPos.x;
+          startRy = glbRightHandPos.y;
+          startRz = glbRightHandPos.z;
+        }
+      } else {
+        fighter.leftArmPivot.rotation.x = -0.78 + leftHandWave * 0.55;
+        fighter.rightArmPivot.rotation.x = -0.78 + rightHandWave * 0.55;
+      }
 
       for (let i = 0; i < ROPE_NODES; i++) {
         const t = i / (ROPE_NODES - 1); // 0 at player hands, 1 at anchor
-        const z = THREE.MathUtils.lerp(1.75, -3.55, t);
         const envelope = Math.sin(t * Math.PI) * (1 - t * 0.25);
-        const baseY = THREE.MathUtils.lerp(0.92, 0.26, t);
 
-        const xL = THREE.MathUtils.lerp(-0.38, -0.14, t);
+        const zL = THREE.MathUtils.lerp(startLz, -3.38, t);
+        const baseYL = THREE.MathUtils.lerp(startLy, 0.24, t);
+        const xL = THREE.MathUtils.lerp(startLx, -0.14, t);
         const waveL = Math.sin(t * 9.5 - leftPhaseRef.current) * leftWaveAmpRef.current * 0.72 * envelope;
-        leftNodes[i].position.set(xL, Math.max(0.07, baseY + waveL), z);
+        leftPoints[i].set(xL, i === 0 ? startLy : Math.max(0.06, baseYL + waveL), zL);
 
-        const xR = THREE.MathUtils.lerp(0.38, 0.14, t);
+        const zR = THREE.MathUtils.lerp(startRz, -3.38, t);
+        const baseYR = THREE.MathUtils.lerp(startRy, 0.24, t);
+        const xR = THREE.MathUtils.lerp(startRx, 0.14, t);
         const waveR = Math.sin(t * 9.5 - rightPhaseRef.current) * rightWaveAmpRef.current * 0.72 * envelope;
-        rightNodes[i].position.set(xR, Math.max(0.07, baseY + waveR), z);
+        rightPoints[i].set(xR, i === 0 ? startRy : Math.max(0.06, baseYR + waveR), zR);
       }
+
+      leftGrip.position.copy(leftPoints[0]);
+      rightGrip.position.copy(rightPoints[0]);
+      updateRopeChain(leftRopeSegs, leftPoints, tmpMid, tmpDir);
+      updateRopeChain(rightRopeSegs, rightPoints, tmpMid, tmpDir);
 
       if (expectedSideRef.current === 'slam') {
         anchorRingMat.color.setHex(0x10b981);

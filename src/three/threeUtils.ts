@@ -429,16 +429,17 @@ export function disposeScene(scene: THREE.Scene, renderer: THREE.WebGLRenderer):
 const gltfCache = new Map<string, Promise<GLTF>>();
 
 const M = (f: string) => `${import.meta.env.BASE_URL}models/${f}.glb`;
+const MA = (f: string) => `${import.meta.env.BASE_URL}models/${f}.glb?rig=4`;
 export const MODEL_URLS = {
   bench: M('bench'),
   bag: M('bag'),
   dumbbells: M('dumbbells'),
   trophy: M('trophy'),
   squatRack: M('squat_rack'),
-  athlete_m_start: M('athlete_m_start'),
-  athlete_m_elite: M('athlete_m_elite'),
-  athlete_f_start: M('athlete_f_start'),
-  athlete_f_elite: M('athlete_f_elite'),
+  athlete_m_start: MA('athlete_m_start'),
+  athlete_m_elite: MA('athlete_m_elite'),
+  athlete_f_start: MA('athlete_f_start'),
+  athlete_f_elite: MA('athlete_f_elite'),
   food_avocado: M('food_avocado'),
   food_water: M('food_water'),
   food_salmon: M('food_salmon'),

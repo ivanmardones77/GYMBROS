@@ -44,46 +44,60 @@ function createAthleticShirtTexture(
     ctx.fillStyle = baseHex;
     ctx.fillRect(0, 0, 256, 256);
 
-    // Micro athletic mesh weave
-    ctx.fillStyle = 'rgba(255,255,255,0.04)';
+    // Breathable athletic micro-mesh weave
+    ctx.fillStyle = 'rgba(255,255,255,0.045)';
     for (let y = 0; y < 256; y += 4) {
-      for (let x = (y % 8 === 0 ? 0 : 2); x < 256; x += 4) {
+      for (let x = y % 8 === 0 ? 0 : 2; x < 256; x += 4) {
         ctx.fillRect(x, y, 1, 1);
       }
     }
 
-    // Side compression panel seams
-    ctx.fillStyle = 'rgba(15, 23, 42, 0.24)';
-    ctx.fillRect(0, 0, 26, 256);
-    ctx.fillRect(230, 0, 26, 256);
+    // Side compression ventilation panels
+    ctx.fillStyle = 'rgba(10, 14, 22, 0.34)';
+    ctx.fillRect(0, 0, 28, 256);
+    ctx.fillRect(228, 0, 28, 256);
     ctx.fillRect(114, 0, 28, 256);
 
-    // Accent V-chevron / athletic chest trim across front (x centered around 64 or 192 on lathe wrap)
+    // Side seam racing accent stripes
+    ctx.fillStyle = accentHex;
+    ctx.fillRect(26, 16, 4, 224);
+    ctx.fillRect(226, 16, 4, 224);
+
+    // Accent V-chevron & GymBros crest on front chest (centered around x=64 on Lathe UV)
     ctx.strokeStyle = accentHex;
     ctx.lineWidth = 6;
     ctx.beginPath();
     ctx.moveTo(28, 66);
-    ctx.lineTo(64, 84);
+    ctx.lineTo(64, 86);
     ctx.lineTo(100, 66);
     ctx.stroke();
 
+    // Small chest badge bar
+    ctx.fillStyle = accentHex;
+    ctx.fillRect(54, 48, 20, 6);
+
     // Subtle muscle definition shading when fitter
-    if (fitnessRatio > 0.35) {
-      const alpha = Math.min(0.24, (fitnessRatio - 0.35) * 0.35);
+    if (fitnessRatio > 0.3) {
+      const alpha = Math.min(0.28, (fitnessRatio - 0.3) * 0.38);
       ctx.strokeStyle = `rgba(15, 23, 42, ${alpha})`;
       ctx.lineWidth = 3;
-      // Pectoral & core seam shading
       ctx.beginPath();
-      ctx.moveTo(40, 108);
-      ctx.quadraticCurveTo(64, 114, 88, 108);
+      ctx.moveTo(38, 108);
+      ctx.quadraticCurveTo(64, 116, 90, 108);
       ctx.stroke();
 
-      if (isMale && fitnessRatio > 0.55) {
+      // Linea alba center shading
+      ctx.beginPath();
+      ctx.moveTo(64, 114);
+      ctx.lineTo(64, 210);
+      ctx.stroke();
+
+      if (isMale && fitnessRatio > 0.5) {
         for (let row = 0; row < 3; row++) {
           const yy = 132 + row * 22;
           ctx.beginPath();
-          ctx.moveTo(48, yy);
-          ctx.lineTo(80, yy);
+          ctx.moveTo(46, yy);
+          ctx.lineTo(82, yy);
           ctx.stroke();
         }
       }
@@ -105,18 +119,18 @@ function createShortsTexture(accentHex: string): THREE.CanvasTexture {
   canvas.height = 128;
   const ctx = canvas.getContext('2d');
   if (ctx) {
-    ctx.fillStyle = '#1E293B';
+    ctx.fillStyle = '#18202c';
     ctx.fillRect(0, 0, 128, 128);
     ctx.fillStyle = 'rgba(255,255,255,0.035)';
-    for (let i = 0; i < 400; i++) {
+    for (let i = 0; i < 420; i++) {
       ctx.fillRect((i * 29) % 128, (i * 53) % 128, 1, 1);
     }
-    // Side sporty stripe
+    // Side sporty stripes
     ctx.fillStyle = accentHex;
     ctx.fillRect(10, 0, 6, 128);
     ctx.fillRect(74, 0, 6, 128);
     // Hem line
-    ctx.fillStyle = 'rgba(255,255,255,0.12)';
+    ctx.fillStyle = 'rgba(255,255,255,0.16)';
     ctx.fillRect(0, 122, 128, 3);
   }
   const tex = new THREE.CanvasTexture(canvas);
@@ -138,7 +152,7 @@ export function buildAthleteModel(opts: AthleteBuildOptions): AthleteRigParts {
   const skinBaseColor = new THREE.Color(skinTone);
   const skinMat = new THREE.MeshPhysicalMaterial({
     color: skinBaseColor,
-    roughness: 0.58,
+    roughness: 0.56,
     metalness: 0.02,
     sheen: 0.25,
     sheenColor: new THREE.Color('#ffd6c4'),
@@ -153,30 +167,30 @@ export function buildAthleteModel(opts: AthleteBuildOptions): AthleteRigParts {
 
   const hairMat = new THREE.MeshStandardMaterial({
     color: new THREE.Color(hairColor),
-    roughness: 0.68,
+    roughness: 0.64,
     metalness: 0.08,
   });
 
   const shirtTex = createAthleticShirtTexture(outfitHex, accentHex, p, isMale);
   const shirtMat = new THREE.MeshPhysicalMaterial({
     map: shirtTex,
-    roughness: outfit === 'titan' ? 0.34 : 0.68,
-    metalness: outfit === 'titan' ? 0.32 : 0.06,
-    sheen: 0.18,
+    roughness: outfit === 'titan' ? 0.32 : 0.65,
+    metalness: outfit === 'titan' ? 0.34 : 0.06,
+    sheen: 0.22,
     sheenColor: new THREE.Color('#ffffff'),
   });
 
   const shortsTex = createShortsTexture(accentHex);
   const shortsMat = new THREE.MeshStandardMaterial({
     map: shortsTex,
-    roughness: 0.72,
+    roughness: 0.7,
     metalness: 0.05,
   });
 
   const accentMat = new THREE.MeshStandardMaterial({
     color: new THREE.Color(accentHex),
-    roughness: outfit === 'titan' ? 0.22 : 0.38,
-    metalness: outfit === 'titan' ? 0.82 : 0.16,
+    roughness: outfit === 'titan' ? 0.22 : 0.36,
+    metalness: outfit === 'titan' ? 0.84 : 0.22,
   });
 
   const sockMat = new THREE.MeshStandardMaterial({
@@ -185,15 +199,33 @@ export function buildAthleteModel(opts: AthleteBuildOptions): AthleteRigParts {
   });
 
   const shoeUpperMat = new THREE.MeshStandardMaterial({
-    color: new THREE.Color('#111111'),
+    color: new THREE.Color('#14171f'),
     roughness: 0.42,
-    metalness: 0.12,
+    metalness: 0.14,
   });
 
   const shoeSoleMat = new THREE.MeshStandardMaterial({
     color: new THREE.Color('#F8FAFC'),
-    roughness: 0.5,
+    roughness: 0.46,
     metalness: 0.05,
+  });
+
+  const shoeTreadMat = new THREE.MeshStandardMaterial({
+    color: new THREE.Color('#090b0f'),
+    roughness: 0.82,
+    metalness: 0.05,
+  });
+
+  const gloveMat = new THREE.MeshStandardMaterial({
+    color: new THREE.Color('#181a20'),
+    roughness: 0.55,
+    metalness: 0.15,
+  });
+
+  const sleeveCompressionMat = new THREE.MeshStandardMaterial({
+    color: new THREE.Color('#11141a'),
+    roughness: 0.62,
+    metalness: 0.1,
   });
 
   const scleraMat = new THREE.MeshStandardMaterial({
@@ -221,12 +253,12 @@ export function buildAthleteModel(opts: AthleteBuildOptions): AthleteRigParts {
   const thighR = isMale ? 0.092 + p * 0.022 : 0.095 + p * 0.016;
 
   // Ground contact shadow
-  const shadowGeo = new THREE.CircleGeometry(0.44, 28);
+  const shadowGeo = new THREE.CircleGeometry(0.46, 28);
   shadowGeo.rotateX(-Math.PI / 2);
   const shadowMat = new THREE.MeshBasicMaterial({
     color: 0x0f172a,
     transparent: true,
-    opacity: 0.28,
+    opacity: 0.3,
     depthWrite: false,
   });
   const shadowMesh = new THREE.Mesh(shadowGeo, shadowMat);
@@ -247,17 +279,21 @@ export function buildAthleteModel(opts: AthleteBuildOptions): AthleteRigParts {
   buffRing.visible = hasBuff;
   root.add(buffRing);
 
-  // Sculpted Leg Builder (Anatomical Quad -> Knee -> Sculpted Calf -> Ankle Sock -> Contoured Sneaker)
+  // Sculpted Leg Builder (Hip Joint -> Quad -> Knee Sleeve/Cap -> Calf -> Crew Sock -> Detailed Multi-Layer Sneaker)
   const buildLeg = (side: -1 | 1) => {
     const legPivot = new THREE.Group();
     legPivot.position.set(side * (hipR * 0.54), 0.88, 0);
 
+    // Seamless hip sphere
+    const hipBall = new THREE.Mesh(new THREE.SphereGeometry(thighR * 0.98, 14, 12), shortsMat);
+    legPivot.add(hipBall);
+
     // Tapered athletic shorts sleeve + sculpted quad
     const thighProfile = [
       new THREE.Vector2(0.01, -0.4),
-      new THREE.Vector2(thighR * 0.66, -0.39), // knee top
-      new THREE.Vector2(thighR * 0.82, -0.31), // lower quad skin
-      new THREE.Vector2(thighR * 1.04, -0.24), // shorts hem flare
+      new THREE.Vector2(thighR * 0.66, -0.39),
+      new THREE.Vector2(thighR * 0.84, -0.31),
+      new THREE.Vector2(thighR * 1.04, -0.24),
       new THREE.Vector2(thighR * 1.08, -0.06),
       new THREE.Vector2(thighR * 1.02, 0.02),
       new THREE.Vector2(0.01, 0.03),
@@ -266,29 +302,56 @@ export function buildAthleteModel(opts: AthleteBuildOptions): AthleteRigParts {
     shortsMesh.castShadow = true;
     legPivot.add(shortsMesh);
 
-    const lowerQuadGeo = new THREE.CylinderGeometry(thighR * 0.84, thighR * 0.66, 0.16, 16);
+    const shortsHem = new THREE.Mesh(
+      new THREE.TorusGeometry(thighR * 0.98, 0.011, 8, 20),
+      accentMat
+    );
+    shortsHem.rotation.x = Math.PI / 2;
+    shortsHem.position.y = -0.235;
+    legPivot.add(shortsHem);
+
+    const lowerQuadGeo = new THREE.CylinderGeometry(thighR * 0.86, thighR * 0.67, 0.16, 16);
     const lowerQuad = new THREE.Mesh(lowerQuadGeo, skinMat);
     lowerQuad.position.y = -0.31;
     lowerQuad.castShadow = true;
     legPivot.add(lowerQuad);
 
-    // Knee Pivot (allows squat & stride knee flexion)
+    // Knee Pivot
     const kneePivot = new THREE.Group();
     kneePivot.position.set(0, -0.4, 0);
     legPivot.add(kneePivot);
 
-    const kneeCap = new THREE.Mesh(new THREE.SphereGeometry(thighR * 0.65, 14, 12), skinMat);
-    kneeCap.scale.set(0.95, 0.95, 1.08);
+    const useKneeSleeve = outfit === 'pro' || outfit === 'titan' || p > 0.6;
+    const kneeCap = new THREE.Mesh(
+      new THREE.SphereGeometry(thighR * 0.66, 14, 12),
+      useKneeSleeve ? sleeveCompressionMat : skinMat
+    );
+    kneeCap.scale.set(0.96, 1.0, 1.08);
     kneeCap.castShadow = true;
     kneePivot.add(kneeCap);
 
-    // Anatomically curved calf (gastrocnemius bulge tapering to slender ankle)
+    if (useKneeSleeve) {
+      const kneeBand = new THREE.Mesh(
+        new THREE.CylinderGeometry(thighR * 0.72, thighR * 0.69, 0.09, 14),
+        sleeveCompressionMat
+      );
+      kneeBand.position.y = -0.02;
+      const kneeTrim = new THREE.Mesh(
+        new THREE.TorusGeometry(thighR * 0.71, 0.009, 6, 18),
+        accentMat
+      );
+      kneeTrim.rotation.x = Math.PI / 2;
+      kneeTrim.position.y = 0.025;
+      kneePivot.add(kneeBand, kneeTrim);
+    }
+
+    // Anatomically curved calf
     const calfProfile = [
       new THREE.Vector2(0.01, -0.39),
-      new THREE.Vector2(thighR * 0.42, -0.38), // ankle
-      new THREE.Vector2(thighR * 0.56, -0.26), // lower tendon
-      new THREE.Vector2(thighR * (0.72 + p * 0.08), -0.14), // sculpted calf muscle
-      new THREE.Vector2(thighR * 0.66, -0.04),
+      new THREE.Vector2(thighR * 0.42, -0.38),
+      new THREE.Vector2(thighR * 0.56, -0.26),
+      new THREE.Vector2(thighR * (0.74 + p * 0.09), -0.14),
+      new THREE.Vector2(thighR * 0.68, -0.04),
       new THREE.Vector2(thighR * 0.6, 0.0),
     ];
     const calfMesh = new THREE.Mesh(new THREE.LatheGeometry(calfProfile, 16), skinMat);
@@ -310,34 +373,59 @@ export function buildAthleteModel(opts: AthleteBuildOptions): AthleteRigParts {
     sockStripe.position.y = -0.31;
     kneePivot.add(sockStripe);
 
-    // Contoured Multi-Part Athletic Sneaker (grounded at y = 0 relative to root)
+    // Multi-Part Sculpted Athletic Trainer Sneaker
     const shoeGroup = new THREE.Group();
-    shoeGroup.position.set(0, -0.44, 0.045);
+    shoeGroup.position.set(0, -0.44, 0.048);
 
-    // Curved wedge midsole (Lathe/Extruded feel via tapered rounded box/capsules)
-    const midsole = new THREE.Mesh(new THREE.CapsuleGeometry(0.062, 0.145, 6, 14), shoeSoleMat);
+    // Grip outsole pad
+    const outsole = new THREE.Mesh(new THREE.CapsuleGeometry(0.063, 0.15, 6, 14), shoeTreadMat);
+    outsole.rotation.x = Math.PI / 2;
+    outsole.scale.set(1.06, 1.0, 0.2);
+    outsole.position.set(0, -0.036, 0.015);
+    shoeGroup.add(outsole);
+
+    // Cushioned EVA midsole
+    const midsole = new THREE.Mesh(new THREE.CapsuleGeometry(0.062, 0.146, 6, 14), shoeSoleMat);
     midsole.rotation.x = Math.PI / 2;
-    midsole.scale.set(1.05, 1.0, 0.44);
-    midsole.position.set(0, -0.02, 0.015);
+    midsole.scale.set(1.05, 1.0, 0.42);
+    midsole.position.set(0, -0.018, 0.015);
     midsole.castShadow = true;
     shoeGroup.add(midsole);
 
-    // Sneaker upper body + sculpted toe box + heel collar
+    // Upper sneaker body + sculpted vamp
     const upperBodyShoe = new THREE.Mesh(new THREE.CapsuleGeometry(0.056, 0.125, 8, 14), shoeUpperMat);
     upperBodyShoe.rotation.x = Math.PI / 2;
     upperBodyShoe.scale.set(1.02, 1.0, 0.78);
-    upperBodyShoe.position.set(0, 0.015, 0.01);
+    upperBodyShoe.position.set(0, 0.016, 0.01);
     upperBodyShoe.castShadow = true;
     shoeGroup.add(upperBodyShoe);
+
+    // Heel stabilizer counter clip + padded collar + laces crossbars
+    const heelClip = new THREE.Mesh(new THREE.CylinderGeometry(0.058, 0.062, 0.045, 14, 1, false, Math.PI * 0.55, Math.PI * 0.9), accentMat);
+    heelClip.position.set(0, 0.008, -0.055);
+    shoeGroup.add(heelClip);
 
     const heelCollar = new THREE.Mesh(new THREE.CylinderGeometry(0.052, 0.058, 0.075, 14), accentMat);
     heelCollar.position.set(0, 0.04, -0.055);
     shoeGroup.add(heelCollar);
 
-    const tongueMesh = new THREE.Mesh(new THREE.BoxGeometry(0.068, 0.045, 0.075), accentMat);
-    tongueMesh.position.set(0, 0.055, 0.015);
+    const tongueMesh = new THREE.Mesh(new THREE.BoxGeometry(0.066, 0.044, 0.075), accentMat);
+    tongueMesh.position.set(0, 0.054, 0.015);
     tongueMesh.rotation.x = -0.38;
     shoeGroup.add(tongueMesh);
+
+    // Crisp side sneaker stripes & lace bars
+    for (const sSide of [-0.057, 0.057]) {
+      const sideBar = new THREE.Mesh(new THREE.BoxGeometry(0.008, 0.02, 0.105), accentMat);
+      sideBar.position.set(sSide, 0.015, 0.008);
+      sideBar.rotation.x = -0.18;
+      shoeGroup.add(sideBar);
+    }
+    for (let l = 0; l < 3; l++) {
+      const lace = new THREE.Mesh(new THREE.BoxGeometry(0.048, 0.007, 0.012), shoeSoleMat);
+      lace.position.set(0, 0.047 - l * 0.008, 0.028 + l * 0.025);
+      shoeGroup.add(lace);
+    }
 
     kneePivot.add(shoeGroup);
     return { legPivot, kneePivot };
@@ -347,7 +435,7 @@ export function buildAthleteModel(opts: AthleteBuildOptions): AthleteRigParts {
   const rightLeg = buildLeg(1);
   root.add(leftLeg.legPivot, rightLeg.legPivot);
 
-  // Pelvis / Sculpted Shorts Waist
+  // Pelvis / Sculpted Shorts Waist + Optional Weightlifting Belt
   const pelvisGroup = new THREE.Group();
   pelvisGroup.position.y = 0.92;
   root.add(pelvisGroup);
@@ -373,21 +461,36 @@ export function buildAthleteModel(opts: AthleteBuildOptions): AthleteRigParts {
   waistbandMesh.position.y = 0.1;
   pelvisGroup.add(waistbandMesh);
 
+  if (outfit === 'pro' || outfit === 'titan') {
+    const liftBelt = new THREE.Mesh(
+      new THREE.CylinderGeometry(waistR * 1.04, waistR * 1.05, 0.095, 24, 1, true),
+      gloveMat
+    );
+    liftBelt.scale.set(1, 1, bellyDepth * 0.84);
+    liftBelt.position.y = 0.11;
+    const buckle = new THREE.Mesh(
+      new THREE.BoxGeometry(0.095, 0.068, 0.024),
+      accentMat
+    );
+    buckle.position.set(0, 0.11, waistR * 0.86 * bellyDepth);
+    pelvisGroup.add(liftBelt, buckle);
+  }
+
   // Upper Body Group (pivoted at waist y = 1.02)
   const upperBody = new THREE.Group();
   upperBody.position.set(0, 1.02, 0);
   root.add(upperBody);
 
-  // Sculpted Torso using high-res anatomical Lathe profile (waist -> ribs -> chest -> traps/collar)
+  // Sculpted Torso using high-res anatomical Lathe profile
   const torsoProfile = [
     new THREE.Vector2(0.01, 0.0),
     new THREE.Vector2(waistR * 0.99, 0.02),
-    new THREE.Vector2(waistR * (1.06 - p * 0.15), 0.16), // midsection (tapered when fit)
-    new THREE.Vector2(chestR * 0.94, 0.33), // ribcage
-    new THREE.Vector2(chestR * 1.02, 0.44), // upper chest
-    new THREE.Vector2(shoulderW * 0.92, 0.54), // shoulder span
-    new THREE.Vector2(0.115, 0.59), // trapezius slope
-    new THREE.Vector2(0.075, 0.62), // collar base
+    new THREE.Vector2(waistR * (1.06 - p * 0.15), 0.16),
+    new THREE.Vector2(chestR * 0.94, 0.33),
+    new THREE.Vector2(chestR * 1.02, 0.44),
+    new THREE.Vector2(shoulderW * 0.92, 0.54),
+    new THREE.Vector2(0.115, 0.59),
+    new THREE.Vector2(0.075, 0.62),
     new THREE.Vector2(0.01, 0.625),
   ];
   const torsoGeo = new THREE.LatheGeometry(torsoProfile, 28);
@@ -404,34 +507,42 @@ export function buildAthleteModel(opts: AthleteBuildOptions): AthleteRigParts {
   upperBody.add(collarRing);
 
   // Subtle anatomical pectoral contour when athletic
-  if (p > 0.35) {
+  if (p > 0.32) {
     const pecGeo = new THREE.SphereGeometry(0.095, 16, 14);
-    pecGeo.scale(1.12, 0.72, 0.5);
+    pecGeo.scale(1.12, 0.74, 0.52);
     const leftPec = new THREE.Mesh(pecGeo, shirtMat);
-    leftPec.position.set(-0.08, 0.41, chestR * 0.51);
+    leftPec.position.set(-0.082, 0.41, chestR * 0.51);
     const rightPec = new THREE.Mesh(pecGeo, shirtMat);
-    rightPec.position.set(0.08, 0.41, chestR * 0.51);
+    rightPec.position.set(0.082, 0.41, chestR * 0.51);
     upperBody.add(leftPec, rightPec);
   }
 
-  // Sculpted Articulated Arms (Shoulder Cap + Bicep Lathe + Forearm Lathe + Wristband + Sculpted Hand)
+  // Sculpted Articulated Arms (Shoulder Sleeve + Bicep Lathe + Elbow + Forearm + Wristband + Lifting Glove)
   const buildArm = (side: -1 | 1) => {
     const armPivot = new THREE.Group();
     armPivot.position.set(side * (shoulderW * 0.95 + armR * 0.42), 0.51, 0);
 
-    // Fitted athletic sleeve / shoulder deltoid cap
-    const deltGeo = new THREE.SphereGeometry(armR * (1.14 + p * 0.18), 16, 14);
-    deltGeo.scale(1.0, 1.15, 0.96);
+    // Fitted athletic sleeve / shoulder deltoid cap + trim ring
+    const deltGeo = new THREE.SphereGeometry(armR * (1.16 + p * 0.18), 16, 14);
+    deltGeo.scale(1.0, 1.18, 0.96);
     const deltMesh = new THREE.Mesh(deltGeo, shirtMat);
     deltMesh.castShadow = true;
     armPivot.add(deltMesh);
 
-    // Sculpted Upper Arm (deltoid insertion -> curved bicep -> elbow)
+    const sleeveTrim = new THREE.Mesh(
+      new THREE.TorusGeometry(armR * 0.96, 0.009, 8, 18),
+      accentMat
+    );
+    sleeveTrim.rotation.x = Math.PI / 2;
+    sleeveTrim.position.y = -0.075;
+    armPivot.add(sleeveTrim);
+
+    // Sculpted Upper Arm
     const upperArmProfile = [
       new THREE.Vector2(0.01, -0.31),
-      new THREE.Vector2(armR * 0.74, -0.3), // elbow
-      new THREE.Vector2(armR * (0.94 + p * 0.16), -0.17), // bicep peak
-      new THREE.Vector2(armR * 0.96, -0.05),
+      new THREE.Vector2(armR * 0.75, -0.3),
+      new THREE.Vector2(armR * (0.96 + p * 0.17), -0.17),
+      new THREE.Vector2(armR * 0.98, -0.05),
       new THREE.Vector2(armR * 0.88, 0.0),
     ];
     const upperArmMesh = new THREE.Mesh(new THREE.LatheGeometry(upperArmProfile, 16), skinMat);
@@ -443,16 +554,16 @@ export function buildAthleteModel(opts: AthleteBuildOptions): AthleteRigParts {
     forearmPivot.position.set(0, -0.31, 0);
     armPivot.add(forearmPivot);
 
-    const elbowCap = new THREE.Mesh(new THREE.SphereGeometry(armR * 0.73, 12, 10), skinMat);
+    const elbowCap = new THREE.Mesh(new THREE.SphereGeometry(armR * 0.74, 12, 10), skinMat);
     forearmPivot.add(elbowCap);
 
     // Sculpted tapered forearm
     const forearmProfile = [
       new THREE.Vector2(0.01, -0.26),
-      new THREE.Vector2(armR * 0.55, -0.25), // wrist
-      new THREE.Vector2(armR * 0.72, -0.13),
-      new THREE.Vector2(armR * (0.82 + p * 0.1), -0.05), // brachioradialis bulge
-      new THREE.Vector2(armR * 0.72, 0.0),
+      new THREE.Vector2(armR * 0.56, -0.25),
+      new THREE.Vector2(armR * 0.74, -0.13),
+      new THREE.Vector2(armR * (0.84 + p * 0.11), -0.05),
+      new THREE.Vector2(armR * 0.73, 0.0),
     ];
     const forearmMesh = new THREE.Mesh(new THREE.LatheGeometry(forearmProfile, 14), skinMat);
     forearmMesh.castShadow = true;
@@ -460,19 +571,23 @@ export function buildAthleteModel(opts: AthleteBuildOptions): AthleteRigParts {
 
     // Athletic Wristband
     const bandMesh = new THREE.Mesh(
-      new THREE.CylinderGeometry(armR * 0.63, armR * 0.61, 0.042, 14),
+      new THREE.CylinderGeometry(armR * 0.65, armR * 0.63, 0.048, 14),
       accentMat
     );
-    bandMesh.position.y = -0.23;
+    bandMesh.position.y = -0.228;
     forearmPivot.add(bandMesh);
 
-    // Sculpted Hand (Palm + Thumb + Curled Finger Block)
+    // Sculpted Hand + Fingerless Gym Lifting Glove Wrap
     const handGroup = new THREE.Group();
     handGroup.position.set(0, -0.295, 0.005);
 
-    const palm = new THREE.Mesh(new THREE.BoxGeometry(armR * 0.9, armR * 1.15, armR * 0.56), skinMat);
+    const palm = new THREE.Mesh(new THREE.BoxGeometry(armR * 0.92, armR * 1.15, armR * 0.58), gloveMat);
     palm.castShadow = true;
     handGroup.add(palm);
+
+    const knucklePad = new THREE.Mesh(new THREE.BoxGeometry(armR * 0.96, armR * 0.34, armR * 0.64), accentMat);
+    knucklePad.position.set(0, -armR * 0.32, 0);
+    handGroup.add(knucklePad);
 
     const fingers = new THREE.Mesh(
       new THREE.CapsuleGeometry(armR * 0.38, armR * 0.55, 6, 10),
@@ -486,7 +601,7 @@ export function buildAthleteModel(opts: AthleteBuildOptions): AthleteRigParts {
       new THREE.CapsuleGeometry(armR * 0.2, armR * 0.38, 6, 8),
       skinMat
     );
-    thumb.position.set(-side * armR * 0.45, -armR * 0.15, armR * 0.25);
+    thumb.position.set(-side * armR * 0.46, -armR * 0.15, armR * 0.25);
     thumb.rotation.z = side * 0.45;
     thumb.rotation.x = 0.35;
     handGroup.add(thumb);
@@ -533,16 +648,15 @@ export function buildAthleteModel(opts: AthleteBuildOptions): AthleteRigParts {
   headGroup.position.set(0, 0.82, 0.01);
   upperBody.add(headGroup);
 
-  // Sculpted Cranium + Tapered Jawline via Lathe
   const jawRoundness = 1 + (1 - p) * 0.12;
   const headProfile = [
-    new THREE.Vector2(0.005, -0.145), // chin point
-    new THREE.Vector2(0.072 * jawRoundness, -0.115), // jawline
-    new THREE.Vector2(0.118 * jawRoundness, -0.055), // cheeks
-    new THREE.Vector2(0.132, 0.015), // temples
-    new THREE.Vector2(0.128, 0.085), // forehead
+    new THREE.Vector2(0.005, -0.145),
+    new THREE.Vector2(0.072 * jawRoundness, -0.115),
+    new THREE.Vector2(0.118 * jawRoundness, -0.055),
+    new THREE.Vector2(0.132, 0.015),
+    new THREE.Vector2(0.128, 0.085),
     new THREE.Vector2(0.09, 0.135),
-    new THREE.Vector2(0.005, 0.152), // crown
+    new THREE.Vector2(0.005, 0.152),
   ];
   const headGeo = new THREE.LatheGeometry(headProfile, 26);
   headGeo.scale(isMale ? 0.96 : 0.91, 1.0, 1.06);
@@ -559,7 +673,7 @@ export function buildAthleteModel(opts: AthleteBuildOptions): AthleteRigParts {
   rightEar.position.set(0.128, -0.01, -0.01);
   headGroup.add(leftEar, rightEar);
 
-  // Layered Expressive Eyes (Sclera + Iris + Pupil + Specular Glint)
+  // Layered Expressive Eyes
   const buildEye = (xOffset: number) => {
     const eyeGrp = new THREE.Group();
     eyeGrp.position.set(xOffset, 0.012, 0.118);
@@ -602,7 +716,7 @@ export function buildAthleteModel(opts: AthleteBuildOptions): AthleteRigParts {
   noseBridge.rotation.x = -0.22;
   headGroup.add(noseBridge);
 
-  // Expressive Mouth (Determined smile / neutral / tired pant)
+  // Expressive Mouth
   if (pose === 'tired') {
     const pantMouth = new THREE.Mesh(new THREE.SphereGeometry(0.016, 10, 8), lipMat);
     pantMouth.scale.set(1.2, 0.65, 0.5);
@@ -630,7 +744,6 @@ export function buildAthleteModel(opts: AthleteBuildOptions): AthleteRigParts {
   headGroup.add(hairCrown);
 
   if (isMale) {
-    // Textured swept athletic quiff / front tuft
     const tuft1 = new THREE.Mesh(new THREE.CapsuleGeometry(0.044, 0.075, 6, 10), hairMat);
     tuft1.rotation.z = Math.PI / 2 - 0.18;
     tuft1.rotation.x = 0.35;
@@ -640,7 +753,6 @@ export function buildAthleteModel(opts: AthleteBuildOptions): AthleteRigParts {
     tuft2.position.set(0.025, 0.115, 0.05);
     headGroup.add(tuft1, tuft2);
   } else {
-    // Swept side bangs + dynamic high athletic ponytail
     const bangLeft = new THREE.Mesh(new THREE.CapsuleGeometry(0.026, 0.075, 6, 10), hairMat);
     bangLeft.position.set(-0.075, 0.085, 0.085);
     bangLeft.rotation.z = 0.48;

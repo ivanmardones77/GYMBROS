@@ -115,50 +115,90 @@ export const MacroCatcherGame: React.FC<MacroCatcherGameProps> = ({
 
     createThreePointLights(scene, 6);
 
-    // Kitchen Prep Counter & 4 Lane Mats
+    // Sleek Meal-Prep Bar Counter + Stainless Backsplash + 4 LED Lane Pads
     const counter = new THREE.Mesh(
-      new THREE.BoxGeometry(6.4, 0.3, 2.4),
-      new THREE.MeshStandardMaterial({ color: 0x1c1c1c, roughness: 0.45, metalness: 0.15 })
+      new THREE.BoxGeometry(6.6, 0.34, 2.5),
+      new THREE.MeshStandardMaterial({ color: 0x14171d, roughness: 0.42, metalness: 0.22 })
     );
-    counter.position.set(0, -0.15, 0);
+    counter.position.set(0, -0.17, 0);
     counter.receiveShadow = true;
     scene.add(counter);
 
-    const laneMat = new THREE.MeshStandardMaterial({ color: 0x2b2b2b, roughness: 0.7 });
+    const counterEdge = new THREE.Mesh(
+      new THREE.BoxGeometry(6.64, 0.04, 0.08),
+      new THREE.MeshPhysicalMaterial({ color: 0x94a3b8, metalness: 0.9, roughness: 0.2 })
+    );
+    counterEdge.position.set(0, 0.0, 1.24);
+    scene.add(counterEdge);
+
+    const laneMat = new THREE.MeshStandardMaterial({ color: 0x1f242d, roughness: 0.65, metalness: 0.15 });
+    const laneGlowMat = new THREE.MeshStandardMaterial({
+      color: 0xff5a1f,
+      emissive: 0xff5a1f,
+      emissiveIntensity: 0.45,
+      roughness: 0.25,
+    });
+    const laneTrimMeshes: THREE.Mesh[] = [];
     LANE_X.forEach((lx) => {
-      const pad = new THREE.Mesh(new THREE.BoxGeometry(0.98, 0.02, 1.8), laneMat);
-      pad.position.set(lx, 0.01, 0);
+      const pad = new THREE.Mesh(new THREE.BoxGeometry(1.0, 0.024, 1.85), laneMat);
+      pad.position.set(lx, 0.012, 0);
       pad.receiveShadow = true;
       scene.add(pad);
+
+      const frontGlow = new THREE.Mesh(new THREE.BoxGeometry(0.92, 0.018, 0.05), laneGlowMat.clone());
+      frontGlow.position.set(lx, 0.025, 0.88);
+      scene.add(frontGlow);
+      laneTrimMeshes.push(frontGlow);
     });
 
-    // Composite 3D Metallic Mixing Bowl
+    // Two-Tone Insulated Meal-Prep Bowl (Carbon Outer Shell + Brushed Steel Interior + Glowing Rim)
     const bowlGroup = new THREE.Group();
     const bowlProfile = [
       new THREE.Vector2(0.01, 0.0),
-      new THREE.Vector2(0.28, 0.02),
-      new THREE.Vector2(0.45, 0.25),
-      new THREE.Vector2(0.49, 0.42),
-      new THREE.Vector2(0.45, 0.42),
-      new THREE.Vector2(0.41, 0.24),
-      new THREE.Vector2(0.25, 0.06),
+      new THREE.Vector2(0.3, 0.02),
+      new THREE.Vector2(0.47, 0.26),
+      new THREE.Vector2(0.51, 0.44),
+      new THREE.Vector2(0.46, 0.44),
+      new THREE.Vector2(0.42, 0.25),
+      new THREE.Vector2(0.26, 0.06),
       new THREE.Vector2(0.01, 0.05),
     ];
     const bowlSteel = new THREE.MeshPhysicalMaterial({
       color: 0xe2e8f0,
-      metalness: 0.9,
-      roughness: 0.18,
+      metalness: 0.92,
+      roughness: 0.16,
     });
-    const bowlMesh = new THREE.Mesh(new THREE.LatheGeometry(bowlProfile, 28), bowlSteel);
+    const bowlMesh = new THREE.Mesh(new THREE.LatheGeometry(bowlProfile, 32), bowlSteel);
     bowlMesh.castShadow = true;
     bowlGroup.add(bowlMesh);
 
+    const carbonBand = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.47, 0.34, 0.18, 28, 1, true),
+      new THREE.MeshStandardMaterial({ color: 0x181b21, roughness: 0.65, metalness: 0.18 })
+    );
+    carbonBand.position.y = 0.15;
+    bowlGroup.add(carbonBand);
+
+    const bowlBaseGrip = new THREE.Mesh(
+      new THREE.TorusGeometry(0.3, 0.024, 10, 28),
+      new THREE.MeshStandardMaterial({ color: 0xff5a1f, roughness: 0.4 })
+    );
+    bowlBaseGrip.rotation.x = Math.PI / 2;
+    bowlBaseGrip.position.y = 0.02;
+    bowlGroup.add(bowlBaseGrip);
+
     const bowlRim = new THREE.Mesh(
-      new THREE.TorusGeometry(0.47, 0.032, 10, 28),
-      new THREE.MeshStandardMaterial({ color: 0xff5a1f, roughness: 0.3, metalness: 0.3 })
+      new THREE.TorusGeometry(0.49, 0.03, 10, 32),
+      new THREE.MeshStandardMaterial({
+        color: 0xff5a1f,
+        emissive: 0xff5a1f,
+        emissiveIntensity: 0.55,
+        roughness: 0.25,
+        metalness: 0.35,
+      })
     );
     bowlRim.rotation.x = Math.PI / 2;
-    bowlRim.position.y = 0.42;
+    bowlRim.position.y = 0.44;
     bowlGroup.add(bowlRim);
 
     bowlGroup.position.set(LANE_X[1], 0.03, 0);
@@ -322,9 +362,16 @@ export const MacroCatcherGame: React.FC<MacroCatcherGameProps> = ({
         return;
       }
 
-      // Smooth damped bowl slide
+      // Smooth damped bowl slide & highlight active lane pad trim
       const targetX = LANE_X[bowlLaneRef.current];
       bowlGroup.position.x = THREE.MathUtils.damp(bowlGroup.position.x, targetX, 18, dt);
+      laneTrimMeshes.forEach((trim, idx) => {
+        const mat = trim.material as THREE.MeshStandardMaterial;
+        const active = idx === bowlLaneRef.current;
+        mat.color.setHex(active ? 0x10b981 : 0x334155);
+        mat.emissive.setHex(active ? 0x10b981 : 0x0f172a);
+        mat.emissiveIntensity = active ? 1.15 : 0.2;
+      });
 
       spawnTimer -= dt;
       if (spawnTimer <= 0) {

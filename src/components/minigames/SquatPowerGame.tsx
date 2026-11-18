@@ -18,10 +18,13 @@ import {
 } from '../../three/threeUtils';
 
 import { AthleteBuildOptions, buildAthleteModel } from '../../three/buildAthleteModel';
+import { GlbPoseRig, loadMinigameGlbAthlete } from '../../three/buildGlbAthlete';
+import { buildOlympicBarbell, buildSquatCage3D } from '../../three/gymProps';
 
 interface SquatPowerGameProps {
   difficulty: DifficultyLevel;
   athlete?: Omit<AthleteBuildOptions, 'pose' | 'hasBuff'>;
+  aiModel?: boolean;
   rivalTargetScore?: number;
   rivalName?: string;
   onComplete: (result: MinigameResult) => void;
@@ -33,6 +36,7 @@ const TOTAL_REPS = 10;
 export const SquatPowerGame: React.FC<SquatPowerGameProps> = ({
   difficulty,
   athlete,
+  aiModel = true,
   rivalTargetScore,
   rivalName,
   onComplete,
@@ -272,50 +276,9 @@ export const SquatPowerGame: React.FC<SquatPowerGameProps> = ({
     floor.receiveShadow = true;
     scene.add(floor);
 
-    // Lifting Platform
-    const platform = new THREE.Mesh(
-      new THREE.BoxGeometry(2.8, 0.08, 2.0),
-      new THREE.MeshStandardMaterial({ color: 0x2b2b2b, roughness: 0.55, metalness: 0.15 })
-    );
-    platform.position.set(0, 0.04, 0);
-    platform.receiveShadow = true;
-    scene.add(platform);
-
-    // Squat Cage Posts
-    const cageMat = new THREE.MeshStandardMaterial({ color: 0x1c1c1c, roughness: 0.4, metalness: 0.78 });
-    const safetyMat = new THREE.MeshStandardMaterial({ color: 0xff5a1f, roughness: 0.35, metalness: 0.4 });
-    const postGeo = new THREE.BoxGeometry(0.11, 2.5, 0.11);
-    const postCoords: [number, number][] = [
-      [-1.05, -0.4],
-      [1.05, -0.4],
-      [-1.05, 0.55],
-      [1.05, 0.55],
-    ];
-    for (const [px, pz] of postCoords) {
-      const p = new THREE.Mesh(postGeo, cageMat);
-      p.position.set(px, 1.25, pz);
-      p.castShadow = true;
-      scene.add(p);
-    }
-
-    // Safety Spotter Arms
-    for (const side of [-1.05, 1.05]) {
-      const arm = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.08, 1.05), safetyMat);
-      arm.position.set(side, 0.85, 0.08);
-      scene.add(arm);
-    }
-
-    // Depth Ring on Floor (glows emerald when charge is inside sweet spot)
-    const depthRingMat = new THREE.MeshStandardMaterial({
-      color: 0x38bdf8,
-      emissive: 0x0284c7,
-      emissiveIntensity: 0.4,
-      roughness: 0.25,
-    });
-    const depthRing = new THREE.Mesh(new THREE.TorusGeometry(0.95, 0.032, 12, 48), depthRingMat);
-    depthRing.rotation.x = Math.PI / 2;
-    depthRing.position.set(0, 0.095, 0.1);
-    scene.add(depthRing);
+    // Competition Squat Cage + Oak/Rubber Lifting Platform + Chalk Stand + Depth Ring
+    const { group: cageGroup, depthRingMat, depthRing } = buildSquatCage3D();
+    scene.add(cageGroup);
 
     // Sculpted Athlete performing the squat inside the cage
     const squatter = buildAthleteModel({
@@ -334,40 +297,31 @@ export const SquatPowerGame: React.FC<SquatPowerGameProps> = ({
     squatter.rightForearmPivot.rotation.z = 1.75;
     scene.add(squatter.root);
 
-    // Olympic Barbell
-    const chromeMat = new THREE.MeshPhysicalMaterial({
-      color: 0xe2e8f0,
-      metalness: 0.94,
-      roughness: 0.16,
+    let glbSquatter: GlbPoseRig | null = null;
+    loadMinigameGlbAthlete({
+      scene,
+      gender: athlete?.gender ?? 'male',
+      fitnessScore: athlete?.fitnessScore ?? 65,
+      outfit: athlete?.outfit ?? 'pro',
+      aiModel,
+      isCancelled: () => unmounted,
+      onLoaded: (rig) => {
+        rig.root.position.set(0, 0.08, 0.14);
+        rig.poseSquat(0, 0.08);
+        scene.add(rig.root);
+        glbSquatter = rig;
+        squatter.root.visible = false;
+      },
     });
-    const barbellGroup = new THREE.Group();
+
+    // Knurled Olympic Barbell + Calibrated Bumper Plates
+    const { group: barbellGroup, platePairs } = buildOlympicBarbell({
+      plateBaseX: 1.2,
+      maxPlates: 5,
+      plateStep: 0.072,
+      plateBaseRadius: 0.36,
+    });
     barbellGroup.position.set(0, 1.58, 0.1);
-
-    const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.026, 0.026, 3.2, 16), chromeMat);
-    shaft.rotation.z = Math.PI / 2;
-    shaft.castShadow = true;
-    barbellGroup.add(shaft);
-
-    const plateColors = [0xff5a1f, 0x0284c7, 0x10b981, 0xf59e0b, 0xe11d48];
-    const platePairs: [THREE.Mesh, THREE.Mesh][] = [];
-    for (let i = 0; i < 5; i++) {
-      const radius = 0.36 - i * 0.025;
-      const pGeo = new THREE.CylinderGeometry(radius, radius, 0.058, 28);
-      pGeo.rotateZ(Math.PI / 2);
-      const pMat = new THREE.MeshStandardMaterial({
-        color: plateColors[i],
-        roughness: 0.42,
-        metalness: 0.2,
-      });
-      const leftP = new THREE.Mesh(pGeo, pMat);
-      leftP.position.x = -1.2 - i * 0.072;
-      leftP.castShadow = true;
-      const rightP = new THREE.Mesh(pGeo, pMat);
-      rightP.position.x = 1.2 + i * 0.072;
-      rightP.castShadow = true;
-      barbellGroup.add(leftP, rightP);
-      platePairs.push([leftP, rightP]);
-    }
     scene.add(barbellGroup);
 
     // 3D Depth Ring Burst Particles
@@ -429,21 +383,26 @@ export const SquatPowerGame: React.FC<SquatPowerGameProps> = ({
 
       barYCurrentRef.current = THREE.MathUtils.damp(barYCurrentRef.current, barYTargetRef.current, 14, dt);
       barTiltRef.current = THREE.MathUtils.damp(barTiltRef.current, 0, 10, dt);
-      barbellGroup.position.y = barYCurrentRef.current;
-      barbellGroup.rotation.z = barTiltRef.current;
 
       // Articulate athlete squat kinematics smoothly with barbell height
       const squatDepth = THREE.MathUtils.clamp((1.58 - barYCurrentRef.current) / 0.66, 0, 1);
-      const dropY = squatDepth * 0.42;
-      squatter.pelvisGroup.position.y = 0.92 - dropY;
-      squatter.upperBody.position.y = 1.02 - dropY;
-      squatter.upperBody.rotation.x = 0.05 + squatDepth * 0.28;
-      squatter.leftLegPivot.position.y = 0.88 - dropY;
-      squatter.rightLegPivot.position.y = 0.88 - dropY;
-      squatter.leftLegPivot.rotation.x = -squatDepth * 0.98;
-      squatter.rightLegPivot.rotation.x = -squatDepth * 0.98;
-      squatter.leftKneePivot.rotation.x = squatDepth * 1.48;
-      squatter.rightKneePivot.rotation.x = squatDepth * 1.48;
+      if (glbSquatter) {
+        const synced = glbSquatter.poseSquat(squatDepth, 0.08);
+        barbellGroup.position.set(0, synced.barY, synced.barZ);
+      } else {
+        barbellGroup.position.set(0, barYCurrentRef.current, 0.1);
+        const dropY = squatDepth * 0.42;
+        squatter.pelvisGroup.position.y = 0.92 - dropY;
+        squatter.upperBody.position.y = 1.02 - dropY;
+        squatter.upperBody.rotation.x = 0.05 + squatDepth * 0.28;
+        squatter.leftLegPivot.position.y = 0.88 - dropY;
+        squatter.rightLegPivot.position.y = 0.88 - dropY;
+        squatter.leftLegPivot.rotation.x = -squatDepth * 0.98;
+        squatter.rightLegPivot.rotation.x = -squatDepth * 0.98;
+        squatter.leftKneePivot.rotation.x = squatDepth * 1.48;
+        squatter.rightKneePivot.rotation.x = squatDepth * 1.48;
+      }
+      barbellGroup.rotation.z = barTiltRef.current;
 
       // Color depth ring dynamically based on proximity to targetCenter
       const dist = Math.abs(chargeRef.current - targetCenter);

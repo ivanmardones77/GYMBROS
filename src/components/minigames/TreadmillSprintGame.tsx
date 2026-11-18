@@ -16,10 +16,17 @@ import {
   addGymDecor,
 } from '../../three/threeUtils';
 import { AthleteBuildOptions, buildAthleteModel } from '../../three/buildAthleteModel';
+import { GlbPoseRig, loadMinigameGlbAthlete } from '../../three/buildGlbAthlete';
+import {
+  buildTrackHurdle3D,
+  buildTreadmillStation3D,
+  createHurdleStripeTexture,
+} from '../../three/gymProps';
 
 interface TreadmillSprintGameProps {
   difficulty: DifficultyLevel;
   athlete?: Omit<AthleteBuildOptions, 'pose' | 'hasBuff'>;
+  aiModel?: boolean;
   rivalTargetScore?: number;
   rivalName?: string;
   onComplete: (result: MinigameResult) => void;
@@ -39,6 +46,7 @@ const DURATION_SEC = 25;
 export const TreadmillSprintGame: React.FC<TreadmillSprintGameProps> = ({
   difficulty,
   athlete,
+  aiModel = true,
   rivalTargetScore,
   rivalName,
   onComplete,
@@ -132,24 +140,20 @@ export const TreadmillSprintGame: React.FC<TreadmillSprintGameProps> = ({
 
     const trackDeck = new THREE.Mesh(
       new THREE.BoxGeometry(1.75, 0.08, 18),
-      new THREE.MeshStandardMaterial({ color: 0x1c1c1c, roughness: 0.72, metalness: 0.12 })
+      new THREE.MeshStandardMaterial({ color: 0x16181e, roughness: 0.72, metalness: 0.12 })
     );
     trackDeck.position.set(0, 0.04, -5);
     trackDeck.receiveShadow = true;
     scene.add(trackDeck);
 
-    // Side metallic rails
-    const railMat = new THREE.MeshStandardMaterial({ color: 0xff5a1f, roughness: 0.3, metalness: 0.75 });
-    const leftRail = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.12, 18), railMat);
-    leftRail.position.set(-0.92, 0.08, -5);
-    const rightRail = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.12, 18), railMat);
-    rightRail.position.set(0.92, 0.08, -5);
-    scene.add(leftRail, rightRail);
+    // Commercial Treadmill Handrails, Side Footboards & Elevated HIIT Telemetry Console
+    const { group: treadmillShell, consoleGlowMat } = buildTreadmillStation3D();
+    scene.add(treadmillShell);
 
     // Moving track belt stripes
     const beltStripes: THREE.Mesh[] = [];
-    const stripeGeo = new THREE.BoxGeometry(1.45, 0.015, 0.18);
-    const stripeMat = new THREE.MeshStandardMaterial({ color: 0x3a3a3a, roughness: 0.6 });
+    const stripeGeo = new THREE.BoxGeometry(1.5, 0.015, 0.18);
+    const stripeMat = new THREE.MeshStandardMaterial({ color: 0x333944, roughness: 0.6 });
     for (let i = 0; i < 12; i++) {
       const m = new THREE.Mesh(stripeGeo, stripeMat);
       m.position.set(0, 0.085, 2 - i * 1.5);
@@ -169,21 +173,27 @@ export const TreadmillSprintGame: React.FC<TreadmillSprintGameProps> = ({
     runner.root.position.set(0, 0.09, 0.8);
     scene.add(runner.root);
 
-    // Obstacle factory (3D Traffic Cone Hurdle)
-    const coneMat = new THREE.MeshStandardMaterial({ color: 0xff6a2b, roughness: 0.35, metalness: 0.1 });
-    const whiteMat = new THREE.MeshStandardMaterial({ color: 0xf8fafc, roughness: 0.4 });
-    const createConeObstacle = () => {
-      const grp = new THREE.Group();
-      const base = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.06, 0.45), coneMat);
-      base.position.y = 0.03;
-      const cone = new THREE.Mesh(new THREE.ConeGeometry(0.2, 0.56, 16), coneMat);
-      cone.position.y = 0.32;
-      cone.castShadow = true;
-      const collar = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.145, 0.14, 16), whiteMat);
-      collar.position.y = 0.32;
-      grp.add(base, cone, collar);
-      return grp;
-    };
+    let glbRunner: GlbPoseRig | null = null;
+    loadMinigameGlbAthlete({
+      scene,
+      gender: athlete?.gender ?? 'male',
+      fitnessScore: athlete?.fitnessScore ?? 68,
+      outfit: athlete?.outfit ?? 'runner',
+      aiModel,
+      isCancelled: () => unmounted,
+      onLoaded: (rig) => {
+        rig.root.rotation.y = Math.PI;
+        rig.root.position.set(0, 0.09, 0.8);
+        rig.poseSprint(0, false, 0, speedRef.current, 0.09);
+        scene.add(rig.root);
+        glbRunner = rig;
+        runner.root.visible = false;
+      },
+    });
+
+    // Obstacle factory (Competition Striped Track Hurdle)
+    const hurdleStripeTex = createHurdleStripeTexture();
+    const createHurdleObstacle = () => buildTrackHurdle3D(hurdleStripeTex);
 
     const obstacles: Obstacle3D[] = [];
     let nextObId = 1;
@@ -257,24 +267,28 @@ export const TreadmillSprintGame: React.FC<TreadmillSprintGameProps> = ({
 
       stridePhaseRef.current += dt * (4 + speedRef.current * 0.65);
       const swing = isJumpingRef.current ? 0.55 : Math.sin(stridePhaseRef.current) * 0.72;
-      runner.root.position.y = 0.09 + jumpHeightRef.current;
-      runner.leftLegPivot.rotation.x = swing;
-      runner.rightLegPivot.rotation.x = -swing;
-      runner.leftKneePivot.rotation.x = isJumpingRef.current
-        ? 0.95
-        : Math.max(0.05, -swing * 0.85);
-      runner.rightKneePivot.rotation.x = isJumpingRef.current
-        ? 0.95
-        : Math.max(0.05, swing * 0.85);
-      runner.leftArmPivot.rotation.x = -swing * 0.85;
-      runner.rightArmPivot.rotation.x = swing * 0.85;
-      runner.leftForearmPivot.rotation.x = -0.95;
-      runner.rightForearmPivot.rotation.x = -0.95;
-      runner.upperBody.rotation.x = 0.14 + Math.min(0.18, speedRef.current * 0.008);
-      if (runner.ponytailGroup) {
-        runner.ponytailGroup.rotation.x = 0.18 + Math.abs(Math.sin(stridePhaseRef.current)) * 0.25;
+      if (glbRunner) {
+        glbRunner.poseSprint(swing, isJumpingRef.current, jumpHeightRef.current, speedRef.current, 0.09);
+      } else {
+        runner.root.position.y = 0.09 + jumpHeightRef.current;
+        runner.leftLegPivot.rotation.x = swing;
+        runner.rightLegPivot.rotation.x = -swing;
+        runner.leftKneePivot.rotation.x = isJumpingRef.current
+          ? 0.95
+          : Math.max(0.05, -swing * 0.85);
+        runner.rightKneePivot.rotation.x = isJumpingRef.current
+          ? 0.95
+          : Math.max(0.05, swing * 0.85);
+        runner.leftArmPivot.rotation.x = -swing * 0.85;
+        runner.rightArmPivot.rotation.x = swing * 0.85;
+        runner.leftForearmPivot.rotation.x = -0.95;
+        runner.rightForearmPivot.rotation.x = -0.95;
+        runner.upperBody.rotation.x = 0.14 + Math.min(0.18, speedRef.current * 0.008);
+        if (runner.ponytailGroup) {
+          runner.ponytailGroup.rotation.x = 0.18 + Math.abs(Math.sin(stridePhaseRef.current)) * 0.25;
+        }
+        runner.shadowMesh.scale.setScalar(Math.max(0.45, 1 - jumpHeightRef.current * 0.5));
       }
-      runner.shadowMesh.scale.setScalar(Math.max(0.45, 1 - jumpHeightRef.current * 0.5));
 
       // Dynamic FOV widening with speed (only update projection matrix on real change)
       const targetFov = 44 + (speedRef.current - 6) * 0.55;
@@ -284,11 +298,14 @@ export const TreadmillSprintGame: React.FC<TreadmillSprintGameProps> = ({
         camera.updateProjectionMatrix();
       }
 
+      // Pulse treadmill console screen intensity subtly with sprint speed
+      consoleGlowMat.emissiveIntensity = 0.55 + Math.min(1.0, (speedRef.current - 5) / 18) * 0.75;
+
       // Spawn & move 3D hurdles
       nextSpawnTimer -= dt;
       if (nextSpawnTimer <= 0) {
-        const mesh = createConeObstacle();
-        mesh.position.set(0, 0.09, -15);
+        const mesh = createHurdleObstacle();
+        mesh.position.set(0, 0.085, -15);
         scene.add(mesh);
         obstacles.push({ id: nextObId++, z: -15, cleared: false, hit: false, mesh });
         const minGap = Math.max(1.2, 2.35 / cfg.speedMult);
