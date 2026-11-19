@@ -684,7 +684,8 @@ export class GlbPoseRig {
       return;
     }
 
-    const upperKeys: (keyof GlbBoneMap)[] = [
+    // Snapshot Idle/Tired pose built above across full body (legs + upper body)
+    const poseKeys: (keyof GlbBoneMap)[] = [
       'spine02',
       'spine01',
       'spine',
@@ -698,27 +699,144 @@ export class GlbPoseRig {
       'rightArm',
       'rightForeArm',
       'rightHand',
+      'leftUpLeg',
+      'leftLeg',
+      'leftFoot',
+      'rightUpLeg',
+      'rightLeg',
+      'rightFoot',
     ];
 
-    // Snapshot Idle/Tired pose built above
-    for (const k of upperKeys) {
+    for (const k of poseKeys) {
       const bone = b[k];
       const iq = this.idleQuats[k];
       if (bone && iq) iq.copy(bone.quaternion);
     }
 
-    // Deterministic Double-Biceps Flex from clean A-pose bind orientation
-    this.resetToBindPose(upperKeys);
-    this.aimCharDir(b.spine01, b.spine, 0, 0.99, -0.07);
-    this.aimCharDir(b.leftArm, b.leftForeArm, 0.94, 0.22, 0.14);
-    this.aimCharDir(b.rightArm, b.rightForeArm, -0.94, 0.22, 0.14);
-    this.aimCharDir(b.leftForeArm, b.leftHand, -0.58, 0.78, 0.24);
-    this.aimCharDir(b.rightForeArm, b.rightHand, 0.58, 0.78, 0.24);
-    this.rotateCharAxis(b.leftHand, 0, 0, 1, 0.36);
-    this.rotateCharAxis(b.rightHand, 0, 0, 1, -0.36);
+    // 3-Beat Bodybuilding Show-Off Routine ("Postureo"):
+    // Beat A (0..1): Front Double Biceps + bicep-check glance
+    // Beat B (1..2): Zyzz Sky Point + hand-on-hip swagger
+    // Beat C (2..3): Crab Most Muscular + chest pump bounce
+    const cycleT = (elapsed * 0.44) % 3;
+    const smoothWeight = (dist: number) => {
+      const d = Math.min(Math.abs(dist), Math.abs(dist - 3), Math.abs(dist + 3));
+      const t = THREE.MathUtils.clamp(1 - Math.max(0, d - 0.32) / 0.36, 0, 1);
+      return t * t * (3 - 2 * t);
+    };
+    let wA = smoothWeight(cycleT - 0.5);
+    let wB = smoothWeight(cycleT - 1.5);
+    let wC = smoothWeight(cycleT - 2.5);
+    const wSum = Math.max(1e-4, wA + wB + wC);
+    wA /= wSum;
+    wB /= wSum;
+    wC /= wSum;
 
-    // Slerp smoothly between Idle and Flex
-    for (const k of upperKeys) {
+    const groove = Math.sin(elapsed * 4.4);
+    const pump = Math.pow(0.5 + 0.5 * Math.sin(elapsed * 10.5), 2);
+    const bicepPulse = 0.5 + 0.5 * Math.sin(elapsed * 6.2);
+
+    // Build Flex routine from clean A-pose bind orientation
+    this.resetToBindPose(poseKeys);
+
+    // 1. Athletic bodybuilding stance (planted flat feet, subtle hip/knee groove)
+    const lThighX = wA * 0.14 + wB * 0.20 + wC * 0.24;
+    const lThighY = wA * -0.98 + wB * -0.95 + wC * -0.90;
+    const lThighZ = wA * 0.08 + wB * 0.18 + wC * 0.36;
+    const rThighX = wA * -0.14 + wB * -0.14 + wC * -0.24;
+    const rThighY = wA * -0.98 + wB * -0.97 + wC * -0.90;
+    const rThighZ = wA * 0.08 + wB * -0.08 + wC * 0.36;
+    this.aimCharDir(b.leftUpLeg, b.leftLeg, lThighX, lThighY, lThighZ);
+    this.aimCharDir(b.rightUpLeg, b.rightLeg, rThighX, rThighY, rThighZ);
+
+    const lShinZ = wA * -0.06 + wB * -0.12 + wC * -0.26;
+    const rShinZ = wA * -0.06 + wB * 0.06 + wC * -0.26;
+    this.aimCharDir(b.leftLeg, b.leftFoot, 0.04, -0.96, lShinZ);
+    this.aimCharDir(b.rightLeg, b.rightFoot, -0.04, -0.96, rShinZ);
+    this.aimCharDir(b.leftFoot, b.leftToeBase, 0.14, this.restFootSlopeY, this.restFootSlopeZ);
+    this.aimCharDir(b.rightFoot, b.rightToeBase, -0.14, this.restFootSlopeY, this.restFootSlopeZ);
+
+    // 2. Expressive spine & cheeky head choreography
+    const lumX = wA * (groove * 0.03) + wB * -0.08 + wC * 0;
+    const lumZ = wA * -0.03 + wB * -0.05 + wC * 0.16;
+    this.aimCharDir(b.spine02, b.spine01, lumX, 0.98, lumZ);
+
+    const spX = wA * (groove * 0.05) + wB * -0.15 + wC * 0;
+    const spZ = wA * -0.09 + wB * -0.13 + wC * (0.26 + pump * 0.04);
+    this.aimCharDir(b.spine01, b.spine, spX, 0.96, spZ);
+
+    if (b.neck && b.head) {
+      const headPitch = wA * 0.04 + wB * -0.14 + wC * (0.18 + pump * 0.05);
+      const headYaw = wA * (Math.sin(elapsed * 2.3) * 0.38) + wB * -0.34 + wC * (groove * 0.08);
+      this.aimCharDir(b.neck, b.head, 0, 0.98, headPitch);
+      this.rotateCharAxis(b.neck, 0, 1, 0, headYaw * 0.32);
+      this.rotateCharAxis(b.head, 0, 1, 0, headYaw * 0.68);
+    }
+
+    // 3. Arms choreographed cleanly in front/side space (never intersecting torso)
+    const lArmX = wA * 0.92 + wB * 0.56 + wC * 0.48;
+    const lArmY = wA * (0.10 + bicepPulse * 0.08) + wB * -0.80 + wC * -0.72;
+    const lArmZ = wA * 0.14 + wB * 0.08 + wC * (0.48 + pump * 0.09);
+    this.aimCharDir(b.leftArm, b.leftForeArm, lArmX, lArmY, lArmZ);
+
+    const rArmX = wA * -0.92 + wB * -0.72 + wC * -0.48;
+    const rArmY = wA * (0.10 + bicepPulse * 0.08) + wB * (0.64 + groove * 0.05) + wC * -0.72;
+    const rArmZ = wA * 0.14 + wB * 0.24 + wC * (0.48 + pump * 0.09);
+    this.aimCharDir(b.rightArm, b.rightForeArm, rArmX, rArmY, rArmZ);
+
+    const lForeX = wA * (-0.54 - bicepPulse * 0.12) + wB * -0.70 + wC * (-0.72 - pump * 0.14);
+    const lForeY = wA * 0.80 + wB * -0.44 + wC * -0.20;
+    const lForeZ = wA * 0.20 + wB * 0.54 + wC * 0.64;
+    this.aimCharDir(b.leftForeArm, b.leftHand, lForeX, lForeY, lForeZ);
+
+    const rForeX = wA * (0.54 + bicepPulse * 0.12) + wB * -0.50 + wC * (0.72 + pump * 0.14);
+    const rForeY = wA * 0.80 + wB * 0.82 + wC * -0.20;
+    const rForeZ = wA * 0.20 + wB * 0.24 + wC * 0.64;
+    this.aimCharDir(b.rightForeArm, b.rightHand, rForeX, rForeY, rForeZ);
+
+    // 4. Proper bodybuilding closed fist orientations (no outward twisted claws)
+    this.root.updateMatrixWorld(true);
+    this.root.getWorldQuaternion(this.tmpContainerQ);
+
+    // Left fist
+    this.ikBenchF
+      .set(
+        wA * -0.48 + wB * -0.65 + wC * -0.88,
+        wA * 0.85 + wB * -0.62 + wC * -0.20,
+        wA * 0.20 + wB * 0.44 + wC * 0.42
+      )
+      .normalize()
+      .applyQuaternion(this.tmpContainerQ);
+    this.ikBenchP
+      .set(
+        wA * -0.82 + wB * -0.75 + wC * -0.42,
+        wA * -0.25 + wB * 0.35 + wC * 0.55,
+        wA * 0.51 + wB * 0.56 + wC * -0.72
+      )
+      .normalize()
+      .applyQuaternion(this.tmpContainerQ);
+    this.orientHandWorld('left', this.ikBenchF, this.ikBenchP);
+
+    // Right fist
+    this.ikBenchF
+      .set(
+        wA * 0.48 + wB * -0.50 + wC * 0.88,
+        wA * 0.85 + wB * 0.82 + wC * -0.20,
+        wA * 0.20 + wB * 0.26 + wC * 0.42
+      )
+      .normalize()
+      .applyQuaternion(this.tmpContainerQ);
+    this.ikBenchP
+      .set(
+        wA * 0.82 + wB * 0.45 + wC * 0.42,
+        wA * -0.25 + wB * -0.20 + wC * 0.55,
+        wA * 0.51 + wB * 0.87 + wC * -0.72
+      )
+      .normalize()
+      .applyQuaternion(this.tmpContainerQ);
+    this.orientHandWorld('right', this.ikBenchF, this.ikBenchP);
+
+    // Slerp smoothly between Idle/Tired and the Show-Off routine
+    for (const k of poseKeys) {
       const bone = b[k];
       const iq = this.idleQuats[k];
       const tq = this.targetQuats[k];

@@ -397,13 +397,6 @@ export const Athlete3DViewer: React.FC<Athlete3DViewerProps> = ({
     let flexBlend = propsRef.current.pose === 'flex' ? 1 : 0;
     let tiredBlend = propsRef.current.pose === 'tired' ? 1 : 0;
 
-    // Reusable math temporaries (zero per-frame GC allocation)
-    const axisX = new THREE.Vector3(1, 0, 0);
-    const tmpPos = new THREE.Vector3();
-    const tmpQuat = new THREE.Quaternion();
-    const tmpUp = new THREE.Vector3();
-    const rotAlignX = new THREE.Quaternion().setFromAxisAngle(axisX, Math.PI / 2);
-
     const tick = () => {
       if (unmounted) return;
       const dt = Math.min(0.05, Math.max(0.001, clock.getDelta()));
@@ -449,20 +442,46 @@ export const Athlete3DViewer: React.FC<Athlete3DViewerProps> = ({
         rig.upperBody.rotation.z = Math.sin(elapsed * 0.95) * 0.022;
         rig.upperBody.rotation.x = (isTired ? 0.14 : 0.02) + breath * 0.015;
 
-        // Smooth arm pose transitions for Classic rig
-        const flexTargetArmZ = 1.22;
-        const baseArmZ = isTired ? 0.18 : 0.2;
-        const targetLeftArmZ = THREE.MathUtils.lerp(-baseArmZ, -flexTargetArmZ, flexBlend);
-        const targetRightArmZ = THREE.MathUtils.lerp(baseArmZ, flexTargetArmZ, flexBlend);
-        rig.leftArmPivot.rotation.z = targetLeftArmZ;
-        rig.rightArmPivot.rotation.z = targetRightArmZ;
-        rig.leftForearmPivot.rotation.z = THREE.MathUtils.lerp(0, -1.65, flexBlend);
-        rig.rightForearmPivot.rotation.z = THREE.MathUtils.lerp(0, 1.65, flexBlend);
-        rig.leftForearmPivot.rotation.x = THREE.MathUtils.lerp(-0.22, 0, flexBlend);
-        rig.rightForearmPivot.rotation.x = THREE.MathUtils.lerp(-0.22, 0, flexBlend);
+        // Smooth animated show-off pose transitions for Classic procedural rig
+        const cPhase = (elapsed * 0.44) % 3;
+        const wFn = (d: number) => {
+          const m = Math.min(Math.abs(d), Math.abs(d - 3), Math.abs(d + 3));
+          const u = THREE.MathUtils.clamp(1 - Math.max(0, m - 0.32) / 0.36, 0, 1);
+          return u * u * (3 - 2 * u);
+        };
+        let pA = wFn(cPhase - 0.5);
+        let pB = wFn(cPhase - 1.5);
+        let pC = wFn(cPhase - 2.5);
+        const pSum = Math.max(1e-4, pA + pB + pC);
+        pA /= pSum;
+        pB /= pSum;
+        pC /= pSum;
 
-        rig.headGroup.rotation.y = Math.sin(elapsed * 0.7) * 0.08;
-        rig.headGroup.rotation.x = Math.cos(elapsed * freq) * 0.025 + tiredBlend * 0.12 - flexBlend * 0.06;
+        const baseArmZ = isTired ? 0.18 : 0.2;
+        const flexArmZL = pA * 1.24 + pB * 0.45 + pC * 0.35;
+        const flexArmZR = pA * 1.24 + pB * 2.45 + pC * 0.35;
+        const flexArmXL = pA * 0 + pB * 0.15 + pC * (-0.75 - Math.sin(elapsed * 10.5) * 0.12);
+        const flexArmXR = pA * 0 + pB * -0.25 + pC * (-0.75 - Math.sin(elapsed * 10.5) * 0.12);
+        const flexForeZL = pA * (-1.65 - Math.sin(elapsed * 6.2) * 0.14) + pB * 0.85 + pC * 0.65;
+        const flexForeZR = pA * (1.65 + Math.sin(elapsed * 6.2) * 0.14) + pB * 0.15 + pC * -0.65;
+
+        rig.leftArmPivot.rotation.z = THREE.MathUtils.lerp(-baseArmZ, -flexArmZL, flexBlend);
+        rig.rightArmPivot.rotation.z = THREE.MathUtils.lerp(baseArmZ, flexArmZR, flexBlend);
+        rig.leftArmPivot.rotation.x = THREE.MathUtils.lerp(0, flexArmXL, flexBlend);
+        rig.rightArmPivot.rotation.x = THREE.MathUtils.lerp(0, flexArmXR, flexBlend);
+        rig.leftForearmPivot.rotation.z = THREE.MathUtils.lerp(0, flexForeZL, flexBlend);
+        rig.rightForearmPivot.rotation.z = THREE.MathUtils.lerp(0, flexForeZR, flexBlend);
+        rig.leftForearmPivot.rotation.x = THREE.MathUtils.lerp(-0.22, pC * -0.9, flexBlend);
+        rig.rightForearmPivot.rotation.x = THREE.MathUtils.lerp(-0.22, pC * -0.9, flexBlend);
+
+        rig.upperBody.rotation.z = Math.sin(elapsed * 0.95) * 0.022 + flexBlend * (pB * 0.14);
+        rig.upperBody.rotation.x =
+          (isTired ? 0.14 : 0.02) + breath * 0.015 + flexBlend * (pC * 0.24 - (pA + pB) * 0.08);
+
+        rig.headGroup.rotation.y =
+          Math.sin(elapsed * 0.7) * 0.08 + flexBlend * (pA * Math.sin(elapsed * 2.3) * 0.35 + pB * -0.32);
+        rig.headGroup.rotation.x =
+          Math.cos(elapsed * freq) * 0.025 + tiredBlend * 0.12 + flexBlend * (pC * 0.16 - pB * 0.16);
         if (rig.ponytailGroup) {
           rig.ponytailGroup.rotation.z = Math.sin(elapsed * 1.9) * 0.06;
         }
@@ -476,7 +495,6 @@ export const Athlete3DViewer: React.FC<Athlete3DViewerProps> = ({
       const aiRoot = aiRootRef.current;
       const aiRig = aiRigRef.current;
       if (aiRoot && aiRig && aiModelRef.current) {
-        const bones = aiRig.bones;
         const scaleTarget = computeRealisticScale(cur.fitnessScore);
         aiRoot.scale.x = THREE.MathUtils.damp(aiRoot.scale.x, scaleTarget.sx, 5, dt);
         aiRoot.scale.y = THREE.MathUtils.damp(aiRoot.scale.y, scaleTarget.sy, 5, dt);
@@ -485,60 +503,9 @@ export const Athlete3DViewer: React.FC<Athlete3DViewerProps> = ({
         // Apply clean character-space Double-Biceps Flex / Tired breathing pose
         aiRig.applyViewerPoseOverlay(flexBlend, tiredBlend, elapsed);
 
-        // Sync 3D athletic accessories to live skeleton bones
-        aiRoot.updateMatrixWorld(true);
-        const acc = aiAccRef.current;
-        if (acc) {
-          const outfitCfg = GLB_OUTFIT_ACCENT[cur.outfit] || GLB_OUTFIT_ACCENT.basic;
-          acc.group.visible = true;
-          acc.mat.color.setHex(outfitCfg.accent);
-          acc.mat.emissive.setHex(outfitCfg.accent);
-          acc.mat.metalness = outfitCfg.metalness;
-          acc.mat.emissiveIntensity = cur.hasBuff ? 0.55 + Math.sin(elapsed * 4) * 0.25 : 0.25;
-
-          const placeRingOnBone = (
-            mesh: THREE.Mesh,
-            boneA: THREE.Object3D | undefined,
-            boneB: THREE.Object3D | undefined,
-            lerpT: number,
-            show: boolean
-          ) => {
-            mesh.visible = show && Boolean(boneA);
-            if (!mesh.visible || !boneA) return;
-            boneA.getWorldPosition(tmpPos);
-            if (boneB) {
-              boneB.getWorldPosition(tmpUp);
-              tmpPos.lerp(tmpUp, lerpT);
-            }
-            boneA.getWorldQuaternion(tmpQuat);
-            mesh.position.copy(tmpPos);
-            mesh.quaternion.copy(tmpQuat).multiply(rotAlignX);
-          };
-
-          placeRingOnBone(acc.leftWrist, bones.leftForeArm, bones.leftHand, 0.82, true);
-          placeRingOnBone(acc.rightWrist, bones.rightForeArm, bones.rightHand, 0.82, true);
-
-          // Headband aligned upright on Head bone
-          acc.headband.visible = cur.fitnessScore >= 35 && Boolean(bones.head);
-          if (acc.headband.visible && bones.head) {
-            bones.head.getWorldPosition(tmpPos);
-            bones.head.getWorldQuaternion(tmpQuat);
-            tmpUp.set(0, 0.068, 0.008).applyQuaternion(tmpQuat);
-            acc.headband.position.copy(tmpPos).add(tmpUp);
-            acc.headband.quaternion.copy(tmpQuat).multiply(rotAlignX);
-            acc.headband.scale.set(0.95, 1.08, 1);
-          }
-
-          // Athletic waist belt for upgraded outfits
-          acc.belt.visible = cur.outfit !== 'basic' && Boolean(bones.hips);
-          if (acc.belt.visible && bones.hips) {
-            bones.hips.getWorldPosition(tmpPos);
-            bones.hips.getWorldQuaternion(tmpQuat);
-            tmpUp.set(0, 0.045, 0).applyQuaternion(tmpQuat);
-            acc.belt.position.copy(tmpPos).add(tmpUp);
-            acc.belt.quaternion.copy(tmpQuat).multiply(rotAlignX);
-            acc.belt.scale.set(1.06, 0.82, 1);
-          }
+        // Hide loose torus overlays on photorealistic GLB rig (prevents floating rings around neck/wrists)
+        if (aiAccRef.current) {
+          aiAccRef.current.group.visible = false;
         }
       } else if (aiAccRef.current) {
         aiAccRef.current.group.visible = false;
