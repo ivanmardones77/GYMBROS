@@ -46,6 +46,23 @@ import { MacroCatcherGame } from './components/minigames/MacroCatcherGame';
 import { SquatPowerGame } from './components/minigames/SquatPowerGame';
 import { JumpRopeGame } from './components/minigames/JumpRopeGame';
 import { BattleRopesGame } from './components/minigames/BattleRopesGame';
+import { DeadliftGame } from './components/minigames/DeadliftGame';
+import { PullUpsGame } from './components/minigames/PullUpsGame';
+import { TireFlipGame } from './components/minigames/TireFlipGame';
+import { AgilityLadderGame } from './components/minigames/AgilityLadderGame';
+import { DodgeCounterGame } from './components/minigames/DodgeCounterGame';
+import { WallBallGame } from './components/minigames/WallBallGame';
+import { RowingGame } from './components/minigames/RowingGame';
+import { PlankCoreGame } from './components/minigames/PlankCoreGame';
+import { SledPushGame } from './components/minigames/SledPushGame';
+import { ShakeMixerGame } from './components/minigames/ShakeMixerGame';
+import { MobilityFlowGame } from './components/minigames/MobilityFlowGame';
+import { TunnelVisionGame } from './components/minigames/TunnelVisionGame';
+import { MirrorPosingGame } from './components/minigames/MirrorPosingGame';
+import { DumbbellHeistGame } from './components/minigames/DumbbellHeistGame';
+import { EgoLiftingGame } from './components/minigames/EgoLiftingGame';
+import { PumpSelfieGame } from './components/minigames/PumpSelfieGame';
+import { DodgeChatGame } from './components/minigames/DodgeChatGame';
 import { NutritionPanel } from './components/NutritionPanel';
 import { ProgressDashboard } from './components/ProgressDashboard';
 import { WeeklyMultiplayerPanel } from './components/WeeklyMultiplayerPanel';
@@ -100,6 +117,9 @@ export default function App() {
   const [screen, setScreen] = useState<GameScreen>('TITLE_MENU');
   const [activeTab, setActiveTab] = useState<ActiveTab>('gym');
   const [selectedDifficulty, setSelectedDifficulty] = useState<DifficultyLevel>(1);
+  const [categoryFilter, setCategoryFilter] = useState<
+    'Todas' | 'Fuerza' | 'Cardio' | 'Combate' | 'Agilidad' | 'Nutrición' | 'Picardía'
+  >('Todas');
 
   const [player, setPlayer] = useState<PlayerStats | null>(null);
   const [history, setHistory] = useState<ProgressPoint[]>([]);
@@ -548,7 +568,12 @@ export default function App() {
 
     const activeHonor = getActiveHonorModifiers(player.activeHonorModifiers);
     const honorBonus = aggregateHonorBonuses(activeHonor);
-    const actualEnergyCost = Math.max(1, Math.round(cfg.energyCost * (1 - honorBonus.energyDiscountPct)));
+    const gameMeta = MINIGAMES.find((g) => g.id === gameId);
+    const energyMult = gameMeta?.energyCostMult ?? 1;
+    const actualEnergyCost = Math.max(
+      1,
+      Math.round(cfg.energyCost * energyMult * (1 - honorBonus.energyDiscountPct))
+    );
 
     if (!opts?.skipEnergyCheck && player.energy < actualEnergyCost) {
       triggerPushNotification(
@@ -826,28 +851,58 @@ export default function App() {
         : null
       : null;
 
-    // Free protein boost when playing Macro Catcher
-    const bonusProtein = result.gameId === 'macros' ? 18 : 0;
-    const bonusEnergy = (result.gameId === 'macros' ? 15 : 0) + honorInstantEnergy;
+    // Nutrition & active recovery bonuses by discipline
+    const bonusProtein =
+      result.gameId === 'macros' ? 18 : result.gameId === 'shake_mixer' ? 22 : 0;
+    const bonusEnergy =
+      (result.gameId === 'macros'
+        ? 15
+        : result.gameId === 'shake_mixer'
+        ? 14
+        : result.gameId === 'mobility_flow'
+        ? 28
+        : 0) + honorInstantEnergy;
+    const hydrationDelta =
+      result.gameId === 'shake_mixer' ? 18 : result.gameId === 'mobility_flow' ? 12 : -9;
+
+    const strengthGames = new Set<MinigameId>([
+      'bench',
+      'squats',
+      'deadlift',
+      'pullups',
+      'tire_flip',
+      'wall_ball',
+      'plank_core',
+      'tunnel_vision',
+      'ego_lifting',
+    ]);
+    const cardioGames = new Set<MinigameId>(['sprint', 'rope', 'rowing', 'sled_push']);
+    const agilityGames = new Set<MinigameId>([
+      'boxing',
+      'battle_ropes',
+      'agility_ladder',
+      'dodge_counter',
+      'mirror_posing',
+      'dumbbell_heist',
+      'pump_selfie',
+      'dodge_chat',
+    ]);
 
     let updatedPlayer: PlayerStats = {
       ...player,
       weightKg: nextWeight,
       bodyFatPct: nextFat,
       muscleKg: nextMuscle,
-      strength:
-        player.strength + (result.gameId === 'bench' || result.gameId === 'squats' ? 2 : 1),
-      cardio:
-        player.cardio + (result.gameId === 'sprint' || result.gameId === 'rope' ? 2 : 1),
-      agility:
-        player.agility + (result.gameId === 'boxing' || result.gameId === 'battle_ropes' ? 2 : 1),
+      strength: player.strength + (strengthGames.has(result.gameId) ? 2 : 1),
+      cardio: player.cardio + (cardioGames.has(result.gameId) ? 2 : 1),
+      agility: player.agility + (agilityGames.has(result.gameId) ? 2 : 1),
       fitnessScore: nextFitnessScore,
       level: xpRes1.level,
       xp: xpRes1.xp,
       xpToNext: xpRes1.xpToNext,
       coins: player.coins + coinsEarned,
       energy: Math.min(player.maxEnergy, player.energy + bonusEnergy),
-      hydrationPct: Math.max(15, player.hydrationPct - 9),
+      hydrationPct: Math.max(15, Math.min(100, player.hydrationPct + hydrationDelta)),
       proteinToday: player.proteinToday + bonusProtein,
       activeBuff: nextBuff,
       totalWorkouts: player.totalWorkouts + 1,
@@ -1309,8 +1364,8 @@ export default function App() {
   const xpPct = Math.min(100, Math.round((player.xp / player.xpToNext) * 100));
   const activeHonorMods = getActiveHonorModifiers(player.activeHonorModifiers, honorNowMs);
   const honorBonuses = aggregateHonorBonuses(activeHonorMods);
-  const effectiveEnergyCost = (baseCost: number) =>
-    Math.max(1, Math.round(baseCost * (1 - honorBonuses.energyDiscountPct)));
+  const effectiveEnergyCost = (baseCost: number, costMult = 1) =>
+    Math.max(1, Math.round(baseCost * costMult * (1 - honorBonuses.energyDiscountPct)));
 
   return (
     <div className="min-h-screen text-white flex flex-col">
@@ -1558,6 +1613,295 @@ export default function App() {
             )}
             {activeSession.gameId === 'battle_ropes' && (
               <BattleRopesGame
+                difficulty={activeSession.difficulty}
+                athlete={{
+                  gender: player.gender,
+                  fitnessScore: player.fitnessScore,
+                  skinTone: player.skinTone,
+                  hairColor: player.hairColor,
+                  outfit: player.activeOutfit,
+                }}
+                aiModel={aiAthlete}
+                rivalTargetScore={activeSession.rivalTargetScore}
+                rivalName={activeSession.rivalName}
+                onComplete={handleMinigameComplete}
+                onCancel={handleCancelMinigame}
+              />
+            )}
+            {activeSession.gameId === 'deadlift' && (
+              <DeadliftGame
+                difficulty={activeSession.difficulty}
+                athlete={{
+                  gender: player.gender,
+                  fitnessScore: player.fitnessScore,
+                  skinTone: player.skinTone,
+                  hairColor: player.hairColor,
+                  outfit: player.activeOutfit,
+                }}
+                aiModel={aiAthlete}
+                rivalTargetScore={activeSession.rivalTargetScore}
+                rivalName={activeSession.rivalName}
+                onComplete={handleMinigameComplete}
+                onCancel={handleCancelMinigame}
+              />
+            )}
+            {activeSession.gameId === 'pullups' && (
+              <PullUpsGame
+                difficulty={activeSession.difficulty}
+                athlete={{
+                  gender: player.gender,
+                  fitnessScore: player.fitnessScore,
+                  skinTone: player.skinTone,
+                  hairColor: player.hairColor,
+                  outfit: player.activeOutfit,
+                }}
+                aiModel={aiAthlete}
+                rivalTargetScore={activeSession.rivalTargetScore}
+                rivalName={activeSession.rivalName}
+                onComplete={handleMinigameComplete}
+                onCancel={handleCancelMinigame}
+              />
+            )}
+            {activeSession.gameId === 'tire_flip' && (
+              <TireFlipGame
+                difficulty={activeSession.difficulty}
+                athlete={{
+                  gender: player.gender,
+                  fitnessScore: player.fitnessScore,
+                  skinTone: player.skinTone,
+                  hairColor: player.hairColor,
+                  outfit: player.activeOutfit,
+                }}
+                aiModel={aiAthlete}
+                rivalTargetScore={activeSession.rivalTargetScore}
+                rivalName={activeSession.rivalName}
+                onComplete={handleMinigameComplete}
+                onCancel={handleCancelMinigame}
+              />
+            )}
+            {activeSession.gameId === 'agility_ladder' && (
+              <AgilityLadderGame
+                difficulty={activeSession.difficulty}
+                athlete={{
+                  gender: player.gender,
+                  fitnessScore: player.fitnessScore,
+                  skinTone: player.skinTone,
+                  hairColor: player.hairColor,
+                  outfit: player.activeOutfit,
+                }}
+                aiModel={aiAthlete}
+                rivalTargetScore={activeSession.rivalTargetScore}
+                rivalName={activeSession.rivalName}
+                onComplete={handleMinigameComplete}
+                onCancel={handleCancelMinigame}
+              />
+            )}
+            {activeSession.gameId === 'dodge_counter' && (
+              <DodgeCounterGame
+                difficulty={activeSession.difficulty}
+                athlete={{
+                  gender: player.gender,
+                  fitnessScore: player.fitnessScore,
+                  skinTone: player.skinTone,
+                  hairColor: player.hairColor,
+                  outfit: player.activeOutfit,
+                }}
+                aiModel={aiAthlete}
+                rivalTargetScore={activeSession.rivalTargetScore}
+                rivalName={activeSession.rivalName}
+                onComplete={handleMinigameComplete}
+                onCancel={handleCancelMinigame}
+              />
+            )}
+            {activeSession.gameId === 'wall_ball' && (
+              <WallBallGame
+                difficulty={activeSession.difficulty}
+                athlete={{
+                  gender: player.gender,
+                  fitnessScore: player.fitnessScore,
+                  skinTone: player.skinTone,
+                  hairColor: player.hairColor,
+                  outfit: player.activeOutfit,
+                }}
+                aiModel={aiAthlete}
+                rivalTargetScore={activeSession.rivalTargetScore}
+                rivalName={activeSession.rivalName}
+                onComplete={handleMinigameComplete}
+                onCancel={handleCancelMinigame}
+              />
+            )}
+            {activeSession.gameId === 'rowing' && (
+              <RowingGame
+                difficulty={activeSession.difficulty}
+                athlete={{
+                  gender: player.gender,
+                  fitnessScore: player.fitnessScore,
+                  skinTone: player.skinTone,
+                  hairColor: player.hairColor,
+                  outfit: player.activeOutfit,
+                }}
+                aiModel={aiAthlete}
+                rivalTargetScore={activeSession.rivalTargetScore}
+                rivalName={activeSession.rivalName}
+                onComplete={handleMinigameComplete}
+                onCancel={handleCancelMinigame}
+              />
+            )}
+            {activeSession.gameId === 'plank_core' && (
+              <PlankCoreGame
+                difficulty={activeSession.difficulty}
+                athlete={{
+                  gender: player.gender,
+                  fitnessScore: player.fitnessScore,
+                  skinTone: player.skinTone,
+                  hairColor: player.hairColor,
+                  outfit: player.activeOutfit,
+                }}
+                aiModel={aiAthlete}
+                rivalTargetScore={activeSession.rivalTargetScore}
+                rivalName={activeSession.rivalName}
+                onComplete={handleMinigameComplete}
+                onCancel={handleCancelMinigame}
+              />
+            )}
+            {activeSession.gameId === 'sled_push' && (
+              <SledPushGame
+                difficulty={activeSession.difficulty}
+                athlete={{
+                  gender: player.gender,
+                  fitnessScore: player.fitnessScore,
+                  skinTone: player.skinTone,
+                  hairColor: player.hairColor,
+                  outfit: player.activeOutfit,
+                }}
+                aiModel={aiAthlete}
+                rivalTargetScore={activeSession.rivalTargetScore}
+                rivalName={activeSession.rivalName}
+                onComplete={handleMinigameComplete}
+                onCancel={handleCancelMinigame}
+              />
+            )}
+            {activeSession.gameId === 'shake_mixer' && (
+              <ShakeMixerGame
+                difficulty={activeSession.difficulty}
+                athlete={{
+                  gender: player.gender,
+                  fitnessScore: player.fitnessScore,
+                  skinTone: player.skinTone,
+                  hairColor: player.hairColor,
+                  outfit: player.activeOutfit,
+                }}
+                aiModel={aiAthlete}
+                rivalTargetScore={activeSession.rivalTargetScore}
+                rivalName={activeSession.rivalName}
+                onComplete={handleMinigameComplete}
+                onCancel={handleCancelMinigame}
+              />
+            )}
+            {activeSession.gameId === 'mobility_flow' && (
+              <MobilityFlowGame
+                difficulty={activeSession.difficulty}
+                athlete={{
+                  gender: player.gender,
+                  fitnessScore: player.fitnessScore,
+                  skinTone: player.skinTone,
+                  hairColor: player.hairColor,
+                  outfit: player.activeOutfit,
+                }}
+                aiModel={aiAthlete}
+                rivalTargetScore={activeSession.rivalTargetScore}
+                rivalName={activeSession.rivalName}
+                onComplete={handleMinigameComplete}
+                onCancel={handleCancelMinigame}
+              />
+            )}
+            {activeSession.gameId === 'tunnel_vision' && (
+              <TunnelVisionGame
+                difficulty={activeSession.difficulty}
+                athlete={{
+                  gender: player.gender,
+                  fitnessScore: player.fitnessScore,
+                  skinTone: player.skinTone,
+                  hairColor: player.hairColor,
+                  outfit: player.activeOutfit,
+                }}
+                aiModel={aiAthlete}
+                rivalTargetScore={activeSession.rivalTargetScore}
+                rivalName={activeSession.rivalName}
+                onComplete={handleMinigameComplete}
+                onCancel={handleCancelMinigame}
+              />
+            )}
+            {activeSession.gameId === 'mirror_posing' && (
+              <MirrorPosingGame
+                difficulty={activeSession.difficulty}
+                athlete={{
+                  gender: player.gender,
+                  fitnessScore: player.fitnessScore,
+                  skinTone: player.skinTone,
+                  hairColor: player.hairColor,
+                  outfit: player.activeOutfit,
+                }}
+                aiModel={aiAthlete}
+                rivalTargetScore={activeSession.rivalTargetScore}
+                rivalName={activeSession.rivalName}
+                onComplete={handleMinigameComplete}
+                onCancel={handleCancelMinigame}
+              />
+            )}
+            {activeSession.gameId === 'dumbbell_heist' && (
+              <DumbbellHeistGame
+                difficulty={activeSession.difficulty}
+                athlete={{
+                  gender: player.gender,
+                  fitnessScore: player.fitnessScore,
+                  skinTone: player.skinTone,
+                  hairColor: player.hairColor,
+                  outfit: player.activeOutfit,
+                }}
+                aiModel={aiAthlete}
+                rivalTargetScore={activeSession.rivalTargetScore}
+                rivalName={activeSession.rivalName}
+                onComplete={handleMinigameComplete}
+                onCancel={handleCancelMinigame}
+              />
+            )}
+            {activeSession.gameId === 'ego_lifting' && (
+              <EgoLiftingGame
+                difficulty={activeSession.difficulty}
+                athlete={{
+                  gender: player.gender,
+                  fitnessScore: player.fitnessScore,
+                  skinTone: player.skinTone,
+                  hairColor: player.hairColor,
+                  outfit: player.activeOutfit,
+                }}
+                aiModel={aiAthlete}
+                rivalTargetScore={activeSession.rivalTargetScore}
+                rivalName={activeSession.rivalName}
+                onComplete={handleMinigameComplete}
+                onCancel={handleCancelMinigame}
+              />
+            )}
+            {activeSession.gameId === 'pump_selfie' && (
+              <PumpSelfieGame
+                difficulty={activeSession.difficulty}
+                athlete={{
+                  gender: player.gender,
+                  fitnessScore: player.fitnessScore,
+                  skinTone: player.skinTone,
+                  hairColor: player.hairColor,
+                  outfit: player.activeOutfit,
+                }}
+                aiModel={aiAthlete}
+                rivalTargetScore={activeSession.rivalTargetScore}
+                rivalName={activeSession.rivalName}
+                onComplete={handleMinigameComplete}
+                onCancel={handleCancelMinigame}
+              />
+            )}
+            {activeSession.gameId === 'dodge_chat' && (
+              <DodgeChatGame
                 difficulty={activeSession.difficulty}
                 athlete={{
                   gender: player.gender,
@@ -1826,7 +2170,7 @@ export default function App() {
                 <div>
                   <div className="flex flex-wrap items-end justify-between gap-4 mb-5">
                     <div>
-                      <p className="fc-kicker">7 disciplinas</p>
+                      <p className="fc-kicker">{MINIGAMES.length} disciplinas</p>
                       <h2 className="text-[2.6rem] text-white mt-1">Minijuegos del gimnasio</h2>
                     </div>
                     <button
@@ -1846,7 +2190,7 @@ export default function App() {
                           index={i}
                           game={game}
                           meta={cfg.label}
-                          energyCost={effectiveEnergyCost(cfg.energyCost)}
+                          energyCost={effectiveEnergyCost(cfg.energyCost, game.energyCostMult ?? 1)}
                           bestScore={player.personalBests?.[game.id]?.bestScore}
                           onPlay={() => launchMinigame(game.id, selectedDifficulty)}
                         />
@@ -1910,8 +2254,34 @@ export default function App() {
                   </div>
                 </div>
 
+                <div className="flex flex-wrap items-center gap-2">
+                  {(['Todas', 'Fuerza', 'Cardio', 'Combate', 'Agilidad', 'Nutrición', 'Picardía'] as const).map((cat) => {
+                    const active = categoryFilter === cat;
+                    const count =
+                      cat === 'Todas'
+                        ? MINIGAMES.length
+                        : MINIGAMES.filter((g) => g.category === cat).length;
+                    return (
+                      <button
+                        key={cat}
+                        type="button"
+                        onClick={() => setCategoryFilter(cat)}
+                        className={`px-3.5 py-2 rounded-xl text-xs font-bold uppercase tracking-wider transition-all cursor-pointer border ${
+                          active
+                            ? 'bg-orange-500 text-white border-orange-400'
+                            : 'bg-white/[0.04] text-white/65 border-white/[0.08] hover:border-white/25 hover:text-white'
+                        }`}
+                      >
+                        {cat} ({count})
+                      </button>
+                    );
+                  })}
+                </div>
+
                 <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
-                  {MINIGAMES.map((game, i) => {
+                  {MINIGAMES.filter(
+                    (g) => categoryFilter === 'Todas' || g.category === categoryFilter
+                  ).map((game, i) => {
                     const cfg = DIFFICULTY_CONFIG[selectedDifficulty];
                     return (
                       <GameCard
@@ -1920,7 +2290,7 @@ export default function App() {
                         variant="full"
                         game={game}
                         meta={cfg.label}
-                        energyCost={effectiveEnergyCost(cfg.energyCost)}
+                        energyCost={effectiveEnergyCost(cfg.energyCost, game.energyCostMult ?? 1)}
                         kcal={Math.round(game.baseCalories * cfg.rewardMult)}
                         bestScore={player.personalBests?.[game.id]?.bestScore}
                         onPlay={() => launchMinigame(game.id, selectedDifficulty)}

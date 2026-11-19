@@ -565,29 +565,84 @@ export class GlbPoseRig {
   }
 
   /**
-   * Blends live AnimationMixer Idle rotations with deterministic Double-Biceps Flex
-   * and Tired breathing poses without shoulder collapse or gimbal twisting.
+   * Drives a natural, athletic standing Idle posture (breathing chest, relaxed bent arms,
+   * soft half-closed hands, subtle head poise) and blends cleanly into Double-Biceps Flex
+   * or Tired recovery without shoulder torsion.
    */
   applyViewerPoseOverlay(flexBlend: number, tiredBlend: number, elapsed: number): void {
     const b = this.bones;
-    this.setGrip(0);
+    const allUpperKeys: (keyof GlbBoneMap)[] = [
+      'hips',
+      'spine02',
+      'spine01',
+      'spine',
+      'neck',
+      'head',
+      'leftShoulder',
+      'leftArm',
+      'leftForeArm',
+      'leftHand',
+      'rightShoulder',
+      'rightArm',
+      'rightForeArm',
+      'rightHand',
+      'leftUpLeg',
+      'leftLeg',
+      'leftFoot',
+      'rightUpLeg',
+      'rightLeg',
+      'rightFoot',
+    ];
+
+    this.resetToBindPose(allUpperKeys);
+
+    // Subtle organic breathing & relaxed standing athletic stance (arms resting naturally, elbows soft)
+    const breath = Math.sin(elapsed * 2.1);
+    const sway = Math.sin(elapsed * 0.85) * 0.015;
+    this.aimCharDir(b.spine01, b.spine, sway, 0.996, -0.03 + breath * 0.014);
+    if (b.neck && b.head) {
+      this.aimCharDir(b.neck, b.head, Math.sin(elapsed * 0.65) * 0.04, 0.99, 0.04 + breath * 0.01);
+    }
+
+    // Grounded, slightly athletic shoulder-width stance (toes gently out, slight knee softness)
+    this.aimCharDir(b.leftUpLeg, b.leftLeg, 0.08, -0.995, 0.02);
+    this.aimCharDir(b.rightUpLeg, b.rightLeg, -0.08, -0.995, 0.02);
+    this.aimCharDir(b.leftLeg, b.leftFoot, 0.03, -0.996, -0.04);
+    this.aimCharDir(b.rightLeg, b.rightFoot, -0.03, -0.996, -0.04);
+
+    // Relaxed natural arm hang with soft elbow bend (never T-pose, never LeftShoulder pinch)
+    this.aimCharDir(b.leftArm, b.leftForeArm, 0.25, -0.96, 0.05 + breath * 0.015);
+    this.aimCharDir(b.rightArm, b.rightForeArm, -0.25, -0.96, 0.05 + breath * 0.015);
+    this.aimCharDir(b.leftForeArm, b.leftHand, 0.12, -0.92, 0.36 + breath * 0.02);
+    this.aimCharDir(b.rightForeArm, b.rightHand, -0.12, -0.92, 0.36 + breath * 0.02);
 
     if (tiredBlend > 0.01) {
-      const pant = Math.sin(elapsed * 3.4) * 0.028 * tiredBlend;
+      const pant = Math.sin(elapsed * 3.4) * 0.032 * tiredBlend;
       this.aimCharDir(
         b.spine01,
         b.spine,
         0,
-        0.97,
-        0.22 + pant,
-        Math.min(1, tiredBlend * 0.85)
+        0.96,
+        0.24 + pant,
+        Math.min(1, tiredBlend * 0.9)
       );
       if (b.neck && b.head) {
-        this.aimCharDir(b.neck, b.head, 0, 0.92, 0.36, Math.min(1, tiredBlend * 0.85));
+        this.aimCharDir(b.neck, b.head, 0, 0.92, 0.36, Math.min(1, tiredBlend * 0.9));
       }
+      this.aimCharDir(b.leftArm, b.leftForeArm, 0.2, -0.93, 0.28, Math.min(1, tiredBlend * 0.85));
+      this.aimCharDir(b.rightArm, b.rightForeArm, -0.2, -0.93, 0.28, Math.min(1, tiredBlend * 0.85));
+      this.aimCharDir(b.leftForeArm, b.leftHand, -0.1, -0.84, 0.52, Math.min(1, tiredBlend * 0.85));
+      this.aimCharDir(b.rightForeArm, b.rightHand, 0.1, -0.84, 0.52, Math.min(1, tiredBlend * 0.85));
     }
 
-    if (flexBlend <= 0.005) return;
+    // Half-relaxed hand curl in Idle/Tired -> tight flexed fists in Double-Biceps Flex
+    const idleGrip = THREE.MathUtils.lerp(0.34, 0.22, tiredBlend);
+    this.setGrip(THREE.MathUtils.lerp(idleGrip, 0.95, flexBlend));
+
+    if (flexBlend <= 0.005) {
+      this.alignStandingFloor(0);
+      return;
+    }
 
     const upperKeys: (keyof GlbBoneMap)[] = [
       'spine02',
@@ -605,21 +660,20 @@ export class GlbPoseRig {
       'rightHand',
     ];
 
-    // Snapshot idle rotations written by AnimationMixer this frame
+    // Snapshot Idle/Tired pose built above
     for (const k of upperKeys) {
       const bone = b[k];
       const iq = this.idleQuats[k];
       if (bone && iq) iq.copy(bone.quaternion);
     }
 
-    // Build deterministic Double-Biceps Flex from clean A-pose bind orientation
-    // Keep LeftShoulder/RightShoulder in rest orientation so clavicles & sleeves never pinch or tear
+    // Deterministic Double-Biceps Flex from clean A-pose bind orientation
     this.resetToBindPose(upperKeys);
-    this.aimCharDir(b.spine01, b.spine, 0, 0.99, -0.06);
-    this.aimCharDir(b.leftArm, b.leftForeArm, 0.97, 0.16, 0.12);
-    this.aimCharDir(b.rightArm, b.rightForeArm, -0.97, 0.16, 0.12);
-    this.aimCharDir(b.leftForeArm, b.leftHand, -0.56, 0.78, 0.24);
-    this.aimCharDir(b.rightForeArm, b.rightHand, 0.56, 0.78, 0.24);
+    this.aimCharDir(b.spine01, b.spine, 0, 0.99, -0.07);
+    this.aimCharDir(b.leftArm, b.leftForeArm, 0.94, 0.22, 0.14);
+    this.aimCharDir(b.rightArm, b.rightForeArm, -0.94, 0.22, 0.14);
+    this.aimCharDir(b.leftForeArm, b.leftHand, -0.58, 0.78, 0.24);
+    this.aimCharDir(b.rightForeArm, b.rightHand, 0.58, 0.78, 0.24);
     this.rotateCharAxis(b.leftHand, 0, 0, 1, 0.36);
     this.rotateCharAxis(b.rightHand, 0, 0, 1, -0.36);
 
@@ -633,6 +687,7 @@ export class GlbPoseRig {
         bone.quaternion.copy(iq).slerp(tq, flexBlend);
       }
     }
+    this.alignStandingFloor(0);
   }
 
   /** Shifts `this.root.position.y` so the lowest foot ankle keeps exact floor height during bends. */
@@ -662,13 +717,13 @@ export class GlbPoseRig {
     this.setGrip(1.0);
     this.aimCharDir(b.spine01, b.spine, 0, 0.99, 0.08);
 
-    // Thighs forward/down off bench end; shins hanging vertically down (-Z in supine char space)
-    this.aimCharDir(b.leftUpLeg, b.leftLeg, 0.12, -0.96, -0.24);
-    this.aimCharDir(b.rightUpLeg, b.rightLeg, -0.12, -0.96, -0.24);
-    this.aimCharDir(b.leftLeg, b.leftFoot, 0.04, -0.16, -0.98);
-    this.aimCharDir(b.rightLeg, b.rightFoot, -0.04, -0.16, -0.98);
-    this.aimCharDir(b.leftFoot, b.leftToeBase, 0.06, -0.95, 0.3);
-    this.aimCharDir(b.rightFoot, b.rightToeBase, -0.06, -0.95, 0.3);
+    // Wide planted bench stance: knees past end of bench pad, shins angled cleanly forward toward floor
+    this.aimCharDir(b.leftUpLeg, b.leftLeg, 0.2, -0.97, -0.1);
+    this.aimCharDir(b.rightUpLeg, b.rightLeg, -0.2, -0.97, -0.1);
+    this.aimCharDir(b.leftLeg, b.leftFoot, 0.06, -0.34, -0.94);
+    this.aimCharDir(b.rightLeg, b.rightFoot, -0.06, -0.34, -0.94);
+    this.aimCharDir(b.leftFoot, b.leftToeBase, 0.08, -0.94, 0.32);
+    this.aimCharDir(b.rightFoot, b.rightToeBase, -0.08, -0.94, 0.32);
 
     // Pronated bench grip orientation: palms UP supporting barbell, thumbs inward, curled fingers over top
     this.ikBenchF.set(0, 0.12, -0.99).normalize();
@@ -710,15 +765,16 @@ export class GlbPoseRig {
     this.setGrip(1.0);
     // Forward torso brace + proud chest
     this.aimCharDir(b.spine01, b.spine, 0, 0.98, 0.06 + squatDepth * 0.44);
-    // Hips & knees flexing into squat stance
-    const thighY = THREE.MathUtils.lerp(-0.98, -0.18, squatDepth);
-    const thighZ = 0.06 + squatDepth * 0.96;
-    this.aimCharDir(b.leftUpLeg, b.leftLeg, 0.16, thighY, thighZ);
-    this.aimCharDir(b.rightUpLeg, b.rightLeg, -0.16, thighY, thighZ);
-    this.aimCharDir(b.leftLeg, b.leftFoot, 0.06, -0.97, 0.08 + squatDepth * 0.24);
-    this.aimCharDir(b.rightLeg, b.rightFoot, -0.06, -0.97, 0.08 + squatDepth * 0.24);
-    this.aimCharDir(b.leftFoot, b.leftToeBase, 0.14, -0.25, 0.95);
-    this.aimCharDir(b.rightFoot, b.rightToeBase, -0.14, -0.25, 0.95);
+    // Knees track forward & outward while shins angle backward (-Z) from knees over mid-foot
+    const thighY = THREE.MathUtils.lerp(-0.98, -0.22, squatDepth);
+    const thighZ = 0.05 + squatDepth * 0.90;
+    const shinZ = -0.02 - squatDepth * 0.36;
+    this.aimCharDir(b.leftUpLeg, b.leftLeg, 0.22, thighY, thighZ);
+    this.aimCharDir(b.rightUpLeg, b.rightLeg, -0.22, thighY, thighZ);
+    this.aimCharDir(b.leftLeg, b.leftFoot, 0.04, -0.94, shinZ);
+    this.aimCharDir(b.rightLeg, b.rightFoot, -0.04, -0.94, shinZ);
+    this.aimCharDir(b.leftFoot, b.leftToeBase, 0.14, -0.20, 0.97);
+    this.aimCharDir(b.rightFoot, b.rightToeBase, -0.14, -0.20, 0.97);
 
     this.alignStandingFloor(baseFloorY);
     this.root.updateMatrixWorld(true);
@@ -754,37 +810,78 @@ export class GlbPoseRig {
     return { barY, barZ };
   }
 
-  /** Treadmill sprint / hurdle jump pose (`swing` in [-0.72..0.72]). */
-  poseSprint(swing: number, isJumping: boolean, jumpHeight: number, speed: number, floorY: number): void {
+  /**
+   * Treadmill sprint / hurdle jump pose driven by full gait phase `stridePhase` (radians)
+   * for asymmetric knee flexion (~98 deg heel recovery during swing, soft ~20 deg stance absorption).
+   */
+  poseSprint(
+    stridePhase: number,
+    isJumping: boolean,
+    jumpHeight: number,
+    speed: number,
+    floorY: number
+  ): void {
     const b = this.bones;
     this.resetToBindPose();
-    this.setGrip(0.72);
-    const leanZ = 0.18 + Math.min(0.24, speed * 0.01);
-    this.aimCharDir(b.spine01, b.spine, 0, 0.96, leanZ);
+    this.setGrip(0.76);
 
-    const thL = isJumping ? 0.65 : swing;
-    const thR = isJumping ? 0.45 : -swing;
-    const kneeBendL = isJumping ? 1.15 : Math.max(0.1, -swing * 0.95);
-    const kneeBendR = isJumping ? 1.15 : Math.max(0.1, swing * 0.95);
+    const pL = stridePhase;
+    const pR = stridePhase + Math.PI;
+    const speedFactor = THREE.MathUtils.clamp((speed - 4.5) / 14, 0.25, 1.0);
 
-    this.aimCharDir(b.leftUpLeg, b.leftLeg, 0.06, -Math.cos(thL), Math.sin(thL));
-    this.aimCharDir(b.rightUpLeg, b.rightLeg, -0.06, -Math.cos(thR), Math.sin(thR));
+    // Forward athletic sprint lean + subtle counter-rotation between pelvis & shoulders
+    const leanZ = isJumping ? 0.34 : 0.16 + speedFactor * 0.20;
+    const torsoTwist = isJumping ? 0.03 : Math.sin(pL) * 0.09 * speedFactor;
+    this.aimCharDir(b.spine01, b.spine, torsoTwist, 0.95, leanZ);
+    if (b.neck && b.head) {
+      this.aimCharDir(b.neck, b.head, -torsoTwist * 0.4, 0.99, -0.06);
+    }
+
+    // Thigh pitch (+Z forward knee drive, -Z rear push-off) & asymmetric knee bend (>0 folds shin backward)
+    const swingAmp = 0.62 + speedFactor * 0.22;
+    const thL = isJumping ? 0.94 : Math.sin(pL) * swingAmp + 0.14;
+    const thR = isJumping ? -0.32 : Math.sin(pR) * swingAmp + 0.14;
+
+    const recL = 0.5 + 0.5 * Math.cos(pL + 0.65);
+    const recR = 0.5 + 0.5 * Math.cos(pR + 0.65);
+    const maxFlex = 1.48 + speedFactor * 0.38;
+    const stanceFlex = 0.34;
+    const kneeBendL = isJumping ? 0.92 : stanceFlex + (maxFlex - stanceFlex) * Math.pow(recL, 0.85);
+    const kneeBendR = isJumping ? 1.68 : stanceFlex + (maxFlex - stanceFlex) * Math.pow(recR, 0.85);
+
+    this.aimCharDir(b.leftUpLeg, b.leftLeg, 0.07, -Math.cos(thL), Math.sin(thL));
+    this.aimCharDir(b.rightUpLeg, b.rightLeg, -0.07, -Math.cos(thR), Math.sin(thR));
+
     const shAngleL = thL - kneeBendL;
     const shAngleR = thR - kneeBendR;
     this.aimCharDir(b.leftLeg, b.leftFoot, 0.03, -Math.cos(shAngleL), Math.sin(shAngleL));
     this.aimCharDir(b.rightLeg, b.rightFoot, -0.03, -Math.cos(shAngleR), Math.sin(shAngleR));
 
-    // Opposite sprint arm drive with 90-deg flexed elbows
-    const armL = -swing * 0.85;
-    const armR = swing * 0.85;
+    // Natural ankle plantar/dorsiflexion synced to shin angle
+    const footAngL = shAngleL + 1.30;
+    const footAngR = shAngleR + 1.30;
+    this.aimCharDir(b.leftFoot, b.leftToeBase, 0.06, -Math.cos(footAngL), Math.sin(footAngL));
+    this.aimCharDir(b.rightFoot, b.rightToeBase, -0.06, -Math.cos(footAngR), Math.sin(footAngR));
+
+    // Counter-swinging sprinter arms with ~95 deg bent elbows pumping hip-to-cheek
+    const armAmp = 0.65 + speedFactor * 0.25;
+    const armL = isJumping ? 0.55 : -Math.sin(pL) * armAmp + 0.05;
+    const armR = isJumping ? -0.45 : -Math.sin(pR) * armAmp + 0.05;
     this.aimCharDir(b.leftArm, b.leftForeArm, 0.16, -Math.cos(armL), Math.sin(armL));
     this.aimCharDir(b.rightArm, b.rightForeArm, -0.16, -Math.cos(armR), Math.sin(armR));
-    const faL = armL + 1.35;
-    const faR = armR + 1.35;
-    this.aimCharDir(b.leftForeArm, b.leftHand, -0.08, -Math.cos(faL), Math.sin(faL));
-    this.aimCharDir(b.rightForeArm, b.rightHand, 0.08, -Math.cos(faR), Math.sin(faR));
 
-    this.alignStandingFloor(floorY + jumpHeight);
+    const elbowL = isJumping ? 1.55 : 1.48 + Math.max(0, Math.sin(armL)) * 0.35;
+    const elbowR = isJumping ? 1.45 : 1.48 + Math.max(0, Math.sin(armR)) * 0.35;
+    const faL = armL + elbowL;
+    const faR = armR + elbowR;
+    this.aimCharDir(b.leftForeArm, b.leftHand, -0.09, -Math.cos(faL), Math.sin(faL));
+    this.aimCharDir(b.rightForeArm, b.rightHand, 0.09, -Math.cos(faR), Math.sin(faR));
+
+    // Subtle vertical flight bounce twice per stride cycle (peaks between footstrikes)
+    const strideBounce = isJumping
+      ? 0
+      : Math.pow(Math.abs(Math.sin(stridePhase + 0.2)), 1.5) * (0.025 + speedFactor * 0.032);
+    this.alignStandingFloor(floorY + jumpHeight + strideBounce);
   }
 
   /** Athletic half-squat slamming battle ropes (`leftWave`, `rightWave` in [-1..1]). */
@@ -794,13 +891,13 @@ export class GlbPoseRig {
     this.setGrip(1.0);
     this.aimCharDir(b.spine01, b.spine, 0, 0.92, 0.34);
 
-    // Wide grounded half-squat
-    this.aimCharDir(b.leftUpLeg, b.leftLeg, 0.16, -0.78, 0.6);
-    this.aimCharDir(b.rightUpLeg, b.rightLeg, -0.16, -0.78, 0.6);
-    this.aimCharDir(b.leftLeg, b.leftFoot, 0.05, -0.97, 0.22);
-    this.aimCharDir(b.rightLeg, b.rightFoot, -0.05, -0.97, 0.22);
-    this.aimCharDir(b.leftFoot, b.leftToeBase, 0.12, -0.25, 0.95);
-    this.aimCharDir(b.rightFoot, b.rightToeBase, -0.12, -0.25, 0.95);
+    // Wide grounded half-squat (knees tracking forward over toes, shins angled back)
+    this.aimCharDir(b.leftUpLeg, b.leftLeg, 0.18, -0.78, 0.60);
+    this.aimCharDir(b.rightUpLeg, b.rightLeg, -0.18, -0.78, 0.60);
+    this.aimCharDir(b.leftLeg, b.leftFoot, 0.05, -0.97, -0.20);
+    this.aimCharDir(b.rightLeg, b.rightFoot, -0.05, -0.97, -0.20);
+    this.aimCharDir(b.leftFoot, b.leftToeBase, 0.12, -0.22, 0.96);
+    this.aimCharDir(b.rightFoot, b.rightToeBase, -0.12, -0.22, 0.96);
 
     // Vigorous alternating shoulder + forearm rope slam
     this.aimCharDir(b.leftArm, b.leftForeArm, 0.22, -0.72 + leftWave * 0.45, 0.64);
@@ -850,6 +947,468 @@ export class GlbPoseRig {
     );
 
     this.alignStandingFloor(baseFloorY + jumpHeight);
+  }
+
+  /** Conventional Deadlift pull (`liftT` 0 = floor setup .. 1 = tall lockout) with lateral bar tilt & 2-bone IK grip. */
+  poseDeadlift(liftT: number, tiltRad: number, baseFloorY = 0): { barY: number; barZ: number } {
+    const b = this.bones;
+    this.resetToBindPose();
+    this.setGrip(1.0);
+
+    const hinge = THREE.MathUtils.lerp(1.02, 0.04, liftT);
+    this.aimCharDir(b.spine01, b.spine, 0, Math.cos(hinge), Math.sin(hinge));
+    if (b.neck && b.head) {
+      this.aimCharDir(b.neck, b.head, 0, Math.cos(hinge * 0.45), Math.sin(hinge * 0.45));
+    }
+
+    const thighY = THREE.MathUtils.lerp(-0.56, -0.99, liftT);
+    const thighZ = THREE.MathUtils.lerp(0.80, 0.05, liftT);
+    const shinZ = THREE.MathUtils.lerp(-0.22, -0.03, liftT);
+    this.aimCharDir(b.leftUpLeg, b.leftLeg, 0.16, thighY, thighZ);
+    this.aimCharDir(b.rightUpLeg, b.rightLeg, -0.16, thighY, thighZ);
+    this.aimCharDir(b.leftLeg, b.leftFoot, 0.04, -0.96, shinZ);
+    this.aimCharDir(b.rightLeg, b.rightFoot, -0.04, -0.96, shinZ);
+    this.aimCharDir(b.leftFoot, b.leftToeBase, 0.12, -0.20, 0.97);
+    this.aimCharDir(b.rightFoot, b.rightToeBase, -0.12, -0.20, 0.97);
+
+    this.alignStandingFloor(baseFloorY);
+    this.root.updateMatrixWorld(true);
+
+    const barY = baseFloorY + THREE.MathUtils.lerp(0.45, 0.88, liftT);
+    const barZ = THREE.MathUtils.lerp(0.28, 0.21, liftT);
+    const gripX = Math.max(0.32, this.handCal.left.uGrip * 4.2);
+
+    this.ikBenchF.set(0, -0.92, -0.38).normalize();
+    this.ikBenchP.set(0, 0.38, -0.92).normalize();
+
+    for (const side of ['left', 'right'] as const) {
+      const sgn = side === 'left' ? 1 : -1;
+      const cal = this.handCal[side];
+      const handY = barY + Math.sin(tiltRad) * sgn * gripX;
+      this.ikGripVec
+        .set(sgn * gripX, handY, barZ)
+        .addScaledVector(this.ikBenchF, -cal.uGrip)
+        .addScaledVector(this.ikBenchP, -cal.pGrip);
+      this.ikPoleVec.set(sgn * 0.45, 0.12, -0.82);
+      this.solveArmToWristWorld(side, this.ikGripVec, this.ikPoleVec);
+      this.orientHandWorld(side, this.ikBenchF, this.ikBenchP);
+    }
+
+    this.root.updateMatrixWorld(true);
+    return { barY, barZ };
+  }
+
+  /** Pull-up / Muscle-up bar hang (`pullT` 0 = active hang .. 1 = chin over bar .. 1.35 = muscle-up). */
+  posePullUp(pullT: number, barY = 2.25, barZ = 0.14): void {
+    const b = this.bones;
+    this.resetToBindPose();
+    this.setGrip(1.0);
+
+    const lean = pullT > 0.95 ? 0.22 * (pullT - 0.95) : 0.05;
+    this.aimCharDir(b.spine01, b.spine, 0, 0.99, lean);
+
+    // Slight hollow-body knee tuck behind
+    const tuck = Math.min(1, pullT * 0.85);
+    this.aimCharDir(b.leftUpLeg, b.leftLeg, 0.08, -0.96, 0.12 + tuck * 0.18);
+    this.aimCharDir(b.rightUpLeg, b.rightLeg, -0.08, -0.96, 0.12 + tuck * 0.18);
+    this.aimCharDir(b.leftLeg, b.leftFoot, 0.04, -0.78, -0.58 - tuck * 0.25);
+    this.aimCharDir(b.rightLeg, b.rightFoot, -0.04, -0.78, -0.58 - tuck * 0.25);
+
+    this.root.updateMatrixWorld(true);
+    if (b.leftArm) {
+      b.leftArm.getWorldPosition(this.tmpBonePos);
+      // Active scapular hang keeps slight elbow bend & clean shoulder clearance
+      const targetShoulderY =
+        barY - THREE.MathUtils.lerp(0.24, 0.08, Math.min(1, pullT)) + Math.max(0, pullT - 1) * 0.30;
+      this.root.position.y += targetShoulderY - this.tmpBonePos.y;
+    }
+    this.root.updateMatrixWorld(true);
+
+    const gripX = Math.max(0.54, this.handCal.left.uGrip * 6.2);
+    if (pullT <= 1.0) {
+      this.ikBenchF.set(0, 0.55, -0.83).normalize();
+      this.ikBenchP.set(0, -0.83, 0.55).normalize();
+    } else {
+      this.ikBenchF.set(0, -0.4, 0.92).normalize();
+      this.ikBenchP.set(0, -0.92, -0.4).normalize();
+    }
+
+    for (const side of ['left', 'right'] as const) {
+      const sgn = side === 'left' ? 1 : -1;
+      const cal = this.handCal[side];
+      this.ikGripVec
+        .set(sgn * gripX, barY, barZ)
+        .addScaledVector(this.ikBenchF, -cal.uGrip)
+        .addScaledVector(this.ikBenchP, -cal.pGrip);
+      this.ikPoleVec.set(sgn * 0.78, -0.45, 0.52);
+      this.solveArmToWristWorld(side, this.ikGripVec, this.ikPoleVec);
+      this.orientHandWorld(side, this.ikBenchF, this.ikBenchP);
+    }
+    this.root.updateMatrixWorld(true);
+  }
+
+  /** Strongman Tire Flip (`stageT` 0 = low catch under tire .. 1 = chest explosive drive). */
+  poseTireFlip(stageT: number, baseFloorY = 0): void {
+    const b = this.bones;
+    this.resetToBindPose();
+    this.setGrip(1.0);
+
+    const lean = THREE.MathUtils.lerp(0.84, 0.32, stageT);
+    this.aimCharDir(b.spine01, b.spine, 0, Math.cos(lean), Math.sin(lean));
+
+    const thighY = THREE.MathUtils.lerp(-0.46, -0.88, stageT);
+    const thighZ = THREE.MathUtils.lerp(0.80, 0.44, stageT);
+    const shinZ = THREE.MathUtils.lerp(-0.28, -0.18, stageT);
+    this.aimCharDir(b.leftUpLeg, b.leftLeg, 0.22, thighY, thighZ);
+    this.aimCharDir(b.rightUpLeg, b.rightLeg, -0.22, thighY, thighZ);
+    this.aimCharDir(b.leftLeg, b.leftFoot, 0.04, -0.94, shinZ);
+    this.aimCharDir(b.rightLeg, b.rightFoot, -0.04, -0.94, shinZ);
+    this.aimCharDir(b.leftFoot, b.leftToeBase, 0.12, -0.22, 0.96);
+    this.aimCharDir(b.rightFoot, b.rightToeBase, -0.12, -0.22, 0.96);
+
+    const armY = THREE.MathUtils.lerp(-0.82, -0.34, stageT);
+    const armZ = THREE.MathUtils.lerp(0.44, 0.54, stageT);
+    this.aimCharDir(b.leftArm, b.leftForeArm, 0.42, armY, armZ);
+    this.aimCharDir(b.rightArm, b.rightForeArm, -0.42, armY, armZ);
+    this.aimCharDir(b.leftForeArm, b.leftHand, -0.10, THREE.MathUtils.lerp(-0.15, 0.72, stageT), 0.76);
+    this.aimCharDir(b.rightForeArm, b.rightHand, 0.10, THREE.MathUtils.lerp(-0.15, 0.72, stageT), 0.76);
+
+    this.alignStandingFloor(baseFloorY);
+  }
+
+  /** Fast footwork drill on agility ladder (`stridePhase` in radians). */
+  poseAgilityStep(stridePhase: number, baseFloorY = 0): void {
+    const b = this.bones;
+    this.resetToBindPose();
+    this.setGrip(0.65);
+
+    this.aimCharDir(b.spine01, b.spine, Math.sin(stridePhase) * 0.08, 0.96, 0.22);
+
+    const sL = Math.max(0, Math.sin(stridePhase));
+    const sR = Math.max(0, -Math.sin(stridePhase));
+    this.aimCharDir(b.leftUpLeg, b.leftLeg, 0.12, -0.92 + sL * 0.52, 0.25 + sL * 0.62);
+    this.aimCharDir(b.rightUpLeg, b.rightLeg, -0.12, -0.92 + sR * 0.52, 0.25 + sR * 0.62);
+    this.aimCharDir(b.leftLeg, b.leftFoot, 0.04, -0.92, -0.16 - sL * 0.52);
+    this.aimCharDir(b.rightLeg, b.rightFoot, -0.04, -0.92, -0.16 - sR * 0.52);
+
+    const armDrive = Math.sin(stridePhase) * 0.55;
+    this.aimCharDir(b.leftArm, b.leftForeArm, 0.26, -0.78, -armDrive + 0.15);
+    this.aimCharDir(b.rightArm, b.rightForeArm, -0.26, -0.78, armDrive + 0.15);
+    this.aimCharDir(b.leftForeArm, b.leftHand, -0.1, 0.25, 0.94);
+    this.aimCharDir(b.rightForeArm, b.rightHand, 0.1, 0.25, 0.94);
+
+    this.alignStandingFloor(baseFloorY + Math.abs(Math.sin(stridePhase)) * 0.045);
+  }
+
+  /** Boxing slip/duck & counter punch (`dodgeX` -1..1, `duckT` 0..1, `punchT` 0..1). */
+  poseBoxingDefense(dodgeX: number, duckT: number, punchT: number, baseFloorY = 0): void {
+    const b = this.bones;
+    this.resetToBindPose();
+    this.setGrip(1.0);
+
+    const leanFwd = 0.18 + duckT * 0.30 + punchT * 0.14;
+    const twistX = dodgeX * 0.28 - punchT * 0.16;
+    this.aimCharDir(b.spine01, b.spine, twistX, 0.94, leanFwd);
+    if (b.neck && b.head) {
+      this.aimCharDir(b.neck, b.head, dodgeX * 0.14, 0.98, -0.05);
+    }
+
+    const dip = 0.24 + duckT * 0.34;
+    this.aimCharDir(b.leftUpLeg, b.leftLeg, 0.22, -0.92 + dip * 0.45, 0.34 + dip * 0.44);
+    this.aimCharDir(b.rightUpLeg, b.rightLeg, -0.22, -0.95 + dip * 0.45, -0.14 + dip * 0.40);
+    this.aimCharDir(b.leftLeg, b.leftFoot, 0.04, -0.95, -0.18 - dip * 0.22);
+    this.aimCharDir(b.rightLeg, b.rightFoot, -0.04, -0.95, -0.22 - dip * 0.22);
+
+    // Peek-a-boo guard with lower-shoulder clearance & sharp cross extension via forearm
+    this.aimCharDir(b.leftArm, b.leftForeArm, 0.38, -0.62, 0.64);
+    this.aimCharDir(b.leftForeArm, b.leftHand, -0.18, 0.88, 0.42);
+
+    this.aimCharDir(b.rightArm, b.rightForeArm, -0.44, -0.68 + punchT * 0.14, 0.52 + punchT * 0.08);
+    this.aimCharDir(b.rightForeArm, b.rightHand, 0.14 - punchT * 0.10, 0.88 - punchT * 0.86, 0.42 + punchT * 0.57);
+
+    this.alignStandingFloor(baseFloorY);
+  }
+
+  /** Wall Ball Squat-to-Overhead Launch (`squatT` 0..1, `throwT` 0..1). */
+  poseWallBall(squatT: number, throwT: number, aimX: number, baseFloorY = 0): void {
+    const b = this.bones;
+    this.resetToBindPose();
+    this.setGrip(0.45);
+
+    this.aimCharDir(b.spine01, b.spine, aimX * 0.10, 0.97, squatT * 0.30 - throwT * 0.06);
+
+    const thighY = THREE.MathUtils.lerp(-0.97, -0.36, squatT);
+    const thighZ = 0.06 + squatT * 0.78;
+    const shinZ = -0.04 - squatT * 0.30;
+    this.aimCharDir(b.leftUpLeg, b.leftLeg, 0.22, thighY, thighZ);
+    this.aimCharDir(b.rightUpLeg, b.rightLeg, -0.22, thighY, thighZ);
+    this.aimCharDir(b.leftLeg, b.leftFoot, 0.04, -0.94, shinZ);
+    this.aimCharDir(b.rightLeg, b.rightFoot, -0.04, -0.94, shinZ);
+
+    // Chest-rack hold -> upward wall launch without underarm fold
+    const armUp = THREE.MathUtils.lerp(-0.62, -0.04, throwT);
+    const armFwd = THREE.MathUtils.lerp(0.56, 0.50, throwT);
+    this.aimCharDir(b.leftArm, b.leftForeArm, 0.46 + aimX * 0.06, armUp, armFwd);
+    this.aimCharDir(b.rightArm, b.rightForeArm, -0.46 + aimX * 0.06, armUp, armFwd);
+    const faUp = THREE.MathUtils.lerp(0.86, 0.96, throwT);
+    this.aimCharDir(b.leftForeArm, b.leftHand, -0.14 + aimX * 0.08, faUp, 0.32);
+    this.aimCharDir(b.rightForeArm, b.rightHand, 0.14 + aimX * 0.08, faUp, 0.32);
+
+    this.alignStandingFloor(baseFloorY + throwT * 0.06);
+  }
+
+  /** Seated Rowing Ergometer stroke (`strokeT` 0 = forward catch .. 1 = finish pull). */
+  poseRowing(strokeT: number, seatY = 0.42): void {
+    const b = this.bones;
+    this.resetToBindPose();
+    this.setGrip(1.0);
+
+    const lean = THREE.MathUtils.lerp(0.38, -0.30, strokeT);
+    this.aimCharDir(b.spine01, b.spine, 0, Math.cos(lean), Math.sin(lean));
+
+    // Seated thighs forward, knees bend high at catch (strokeT=0) and extend forward at finish (strokeT=1)
+    const thighY = THREE.MathUtils.lerp(0.06, -0.08, strokeT);
+    const thighZ = THREE.MathUtils.lerp(0.95, 0.98, strokeT);
+    const shinY = THREE.MathUtils.lerp(-0.98, -0.45, strokeT);
+    const shinZ = THREE.MathUtils.lerp(0.08, 0.88, strokeT);
+    this.aimCharDir(b.leftUpLeg, b.leftLeg, 0.16, thighY, thighZ);
+    this.aimCharDir(b.rightUpLeg, b.rightLeg, -0.16, thighY, thighZ);
+    this.aimCharDir(b.leftLeg, b.leftFoot, 0.04, shinY, shinZ);
+    this.aimCharDir(b.rightLeg, b.rightFoot, -0.04, shinY, shinZ);
+
+    // Arms reach smoothly at catch -> elbows sweep past ribs at finish
+    const armFwd = THREE.MathUtils.lerp(0.42, -0.38, strokeT);
+    const armDown = THREE.MathUtils.lerp(-0.66, -0.64, strokeT);
+    this.aimCharDir(b.leftArm, b.leftForeArm, 0.46, armDown, armFwd);
+    this.aimCharDir(b.rightArm, b.rightForeArm, -0.46, armDown, armFwd);
+    this.aimCharDir(b.leftForeArm, b.leftHand, -0.12, THREE.MathUtils.lerp(-0.1, 0.25, strokeT), 0.96);
+    this.aimCharDir(b.rightForeArm, b.rightHand, 0.12, THREE.MathUtils.lerp(-0.1, 0.25, strokeT), 0.96);
+
+    if (b.hips) {
+      this.root.position.y = seatY - 0.82;
+    }
+    this.root.updateMatrixWorld(true);
+  }
+
+  /** Forearm Isometric Plank (`wobbleX` -1..1, `trembleY` small offset). */
+  posePlank(wobbleX: number, trembleY: number, floorY = 0): void {
+    const b = this.bones;
+    this.resetToBindPose();
+    this.setGrip(0.8);
+
+    this.aimCharDir(b.spine01, b.spine, wobbleX * 0.06, 0.99, -0.04 + trembleY * 0.08);
+    this.aimCharDir(b.leftUpLeg, b.leftLeg, 0.06, -0.995, 0.02);
+    this.aimCharDir(b.rightUpLeg, b.rightLeg, -0.06, -0.995, 0.02);
+    this.aimCharDir(b.leftLeg, b.leftFoot, 0.02, -0.995, -0.03);
+    this.aimCharDir(b.rightLeg, b.rightFoot, -0.02, -0.995, -0.03);
+    this.aimCharDir(b.leftFoot, b.leftToeBase, 0.04, -0.92, -0.35);
+    this.aimCharDir(b.rightFoot, b.rightToeBase, -0.04, -0.92, -0.35);
+
+    // Forearms planted under chest supporting body
+    this.aimCharDir(b.leftArm, b.leftForeArm, 0.18, -0.32, 0.92);
+    this.aimCharDir(b.rightArm, b.rightForeArm, -0.18, -0.32, 0.92);
+    this.aimCharDir(b.leftForeArm, b.leftHand, -0.22, 0.92, 0.24);
+    this.aimCharDir(b.rightForeArm, b.rightHand, 0.22, 0.92, 0.24);
+
+    // Tilt athlete prone over mat, keeping lowest toe/forearm resting near floorY
+    this.root.rotation.x = Math.PI * 0.47;
+    this.root.rotation.z = wobbleX * 0.07;
+    this.root.updateMatrixWorld(true);
+    if (b.leftToeBase) {
+      b.leftToeBase.getWorldPosition(this.tmpLeftFootPos);
+      this.root.position.y += (floorY + 0.04 + trembleY * 0.015) - this.tmpLeftFootPos.y;
+    }
+    this.root.updateMatrixWorld(true);
+  }
+
+  /** Heavy Prowler Sled Push (`stridePhase` in radians). */
+  poseSledPush(stridePhase: number, baseFloorY = 0): void {
+    const b = this.bones;
+    this.resetToBindPose();
+    this.setGrip(1.0);
+
+    // Deep 36-deg forward drive torso angle
+    this.aimCharDir(b.spine01, b.spine, Math.sin(stridePhase) * 0.05, 0.80, 0.58);
+
+    const pL = stridePhase;
+    const pR = stridePhase + Math.PI;
+    const thL = Math.sin(pL) * 0.62 - 0.14;
+    const thR = Math.sin(pR) * 0.62 - 0.14;
+    const kbL = 0.36 + 0.95 * (0.5 + 0.5 * Math.cos(pL + 0.45));
+    const kbR = 0.36 + 0.95 * (0.5 + 0.5 * Math.cos(pR + 0.45));
+
+    this.aimCharDir(b.leftUpLeg, b.leftLeg, 0.08, -Math.cos(thL), Math.sin(thL));
+    this.aimCharDir(b.rightUpLeg, b.rightLeg, -0.08, -Math.cos(thR), Math.sin(thR));
+    this.aimCharDir(b.leftLeg, b.leftFoot, 0.04, -Math.cos(thL - kbL), Math.sin(thL - kbL));
+    this.aimCharDir(b.rightLeg, b.rightFoot, -0.04, -Math.cos(thR - kbR), Math.sin(thR - kbR));
+
+    // Wide braced upper arms + forward forearms pushing upright sled handles
+    this.aimCharDir(b.leftArm, b.leftForeArm, 0.48, -0.52, 0.48);
+    this.aimCharDir(b.rightArm, b.rightForeArm, -0.48, -0.52, 0.48);
+    this.aimCharDir(b.leftForeArm, b.leftHand, -0.06, 0.32, 0.94);
+    this.aimCharDir(b.rightForeArm, b.rightHand, 0.06, 0.32, 0.94);
+
+    this.alignStandingFloor(baseFloorY);
+  }
+
+  /** Supplement Bar Shaker Mix (`shakePhase` in radians). */
+  poseShakeMixer(shakePhase: number, baseFloorY = 0): void {
+    const b = this.bones;
+    this.resetToBindPose();
+    this.setGrip(1.0);
+
+    const bob = Math.sin(shakePhase) * 0.25;
+    this.aimCharDir(b.spine01, b.spine, Math.sin(shakePhase * 0.5) * 0.05, 0.98, 0.06);
+    this.aimCharDir(b.leftUpLeg, b.leftLeg, 0.08, -0.995, 0.02);
+    this.aimCharDir(b.rightUpLeg, b.rightLeg, -0.08, -0.995, 0.02);
+    this.aimCharDir(b.leftLeg, b.leftFoot, 0.03, -0.995, -0.04);
+    this.aimCharDir(b.rightLeg, b.rightFoot, -0.03, -0.995, -0.04);
+
+    // Right arm vigorously shaking cup chest-high, left braced smoothly
+    this.aimCharDir(b.rightArm, b.rightForeArm, -0.28, -0.58 + bob * 0.35, 0.68);
+    this.aimCharDir(b.rightForeArm, b.rightHand, 0.18, 0.65 + bob * 0.85, 0.62);
+    this.aimCharDir(b.leftArm, b.leftForeArm, 0.28, -0.88, 0.25);
+    this.aimCharDir(b.leftForeArm, b.leftHand, -0.15, -0.22, 0.92);
+
+    this.alignStandingFloor(baseFloorY);
+  }
+
+  /** Guided Mobility Flow Stretch (`flowPhase` in radians). */
+  poseMobilityStretch(flowPhase: number, baseFloorY = 0): void {
+    const b = this.bones;
+    this.resetToBindPose();
+    this.setGrip(0.15);
+
+    const swayX = Math.sin(flowPhase) * 0.18;
+    const reachUp = 0.5 + 0.5 * Math.sin(flowPhase * 0.5);
+    this.aimCharDir(b.spine01, b.spine, swayX, 0.96, 0.05);
+    if (b.neck && b.head) {
+      this.aimCharDir(b.neck, b.head, swayX * 0.4, 0.98, -0.06);
+    }
+
+    this.aimCharDir(b.leftUpLeg, b.leftLeg, 0.16, -0.96, 0.14);
+    this.aimCharDir(b.rightUpLeg, b.rightLeg, -0.16, -0.96, 0.14);
+    this.aimCharDir(b.leftLeg, b.leftFoot, 0.04, -0.98, -0.12);
+    this.aimCharDir(b.rightLeg, b.rightFoot, -0.04, -0.98, -0.12);
+
+    // Smooth open chest & overhead forearm sweep without collapsing deltoids
+    const armY = THREE.MathUtils.lerp(-0.62, 0.12, reachUp);
+    this.aimCharDir(b.leftArm, b.leftForeArm, 0.58 + swayX * 0.25, armY, 0.32);
+    this.aimCharDir(b.rightArm, b.rightForeArm, -0.58 + swayX * 0.25, armY, 0.32);
+    this.aimCharDir(b.leftForeArm, b.leftHand, -0.16 + swayX * 0.35, 0.88, 0.34);
+    this.aimCharDir(b.rightForeArm, b.rightHand, 0.16 + swayX * 0.35, 0.88, 0.34);
+
+    this.alignStandingFloor(baseFloorY);
+  }
+
+  /** Standing Dumbbell Curl with gaze deflection (`curlT` 0..1, `headYaw` -1..1). */
+  poseTunnelCurl(curlT: number, headYaw: number, baseFloorY = 0): void {
+    const b = this.bones;
+    this.resetToBindPose();
+    this.setGrip(1.0);
+
+    this.aimCharDir(b.spine01, b.spine, 0, 0.99, 0.04);
+    if (b.neck && b.head) {
+      this.aimCharDir(b.neck, b.head, headYaw * 0.65, 0.96, -0.12);
+    }
+
+    this.aimCharDir(b.leftUpLeg, b.leftLeg, 0.1, -0.99, 0.06);
+    this.aimCharDir(b.rightUpLeg, b.rightLeg, -0.1, -0.99, 0.06);
+    this.aimCharDir(b.leftLeg, b.leftFoot, 0.03, -0.99, -0.05);
+    this.aimCharDir(b.rightLeg, b.rightFoot, -0.03, -0.99, -0.05);
+
+    this.aimCharDir(b.leftArm, b.leftForeArm, 0.40, -0.90, 0.14);
+    this.aimCharDir(b.rightArm, b.rightForeArm, -0.40, -0.90, 0.14);
+    const faY = THREE.MathUtils.lerp(-0.55, 0.88, curlT);
+    const faZ = THREE.MathUtils.lerp(0.82, 0.42, curlT);
+    this.aimCharDir(b.leftForeArm, b.leftHand, -0.08, faY, faZ);
+    this.aimCharDir(b.rightForeArm, b.rightHand, 0.08, faY, faZ);
+
+    this.alignStandingFloor(baseFloorY);
+  }
+
+  /** Front Double Biceps Flex vs Casual Neck-Stretch Disguise (`flexT` 0..1). */
+  poseMirrorFlex(flexT: number, disguise: boolean, baseFloorY = 0): void {
+    const b = this.bones;
+    this.resetToBindPose();
+    this.setGrip(disguise ? 0.15 : 1.0);
+
+    if (disguise) {
+      this.aimCharDir(b.spine01, b.spine, 0.12, 0.98, 0.02);
+      if (b.neck && b.head) {
+        this.aimCharDir(b.neck, b.head, 0.35, 0.92, 0.18);
+      }
+      this.aimCharDir(b.leftUpLeg, b.leftLeg, 0.08, -0.995, 0.02);
+      this.aimCharDir(b.rightUpLeg, b.rightLeg, -0.08, -0.995, 0.02);
+      this.aimCharDir(b.leftArm, b.leftForeArm, 0.36, -0.92, 0.08);
+      this.aimCharDir(b.rightArm, b.rightForeArm, -0.44, -0.78, 0.25);
+      this.aimCharDir(b.leftForeArm, b.leftHand, -0.05, -0.82, 0.45);
+      this.aimCharDir(b.rightForeArm, b.rightHand, 0.28, 0.78, 0.35);
+    } else {
+      const puff = 0.08 + flexT * 0.10;
+      this.aimCharDir(b.spine01, b.spine, 0, 0.99, -puff);
+      this.aimCharDir(b.leftUpLeg, b.leftLeg, 0.16, -0.98, 0.08);
+      this.aimCharDir(b.rightUpLeg, b.rightLeg, -0.16, -0.98, 0.08);
+      this.aimCharDir(b.leftArm, b.leftForeArm, 0.94, 0.08 + flexT * 0.16, 0.18);
+      this.aimCharDir(b.rightArm, b.rightForeArm, -0.94, 0.08 + flexT * 0.16, 0.18);
+      this.aimCharDir(b.leftForeArm, b.leftHand, -0.45, 0.88, 0.18);
+      this.aimCharDir(b.rightForeArm, b.rightHand, 0.45, 0.88, 0.18);
+    }
+
+    this.alignStandingFloor(baseFloorY);
+  }
+
+  /** Sneaky Heist Walk / Dumbbell Carry (`walkPhase` in rad, `sneaking`, `hasWeights`). */
+  poseStealthCarry(walkPhase: number, sneaking: boolean, hasWeights: boolean, baseFloorY = 0): void {
+    const b = this.bones;
+    this.resetToBindPose();
+    this.setGrip(hasWeights ? 1.0 : 0.4);
+
+    const crouch = sneaking ? 0.32 : 0.08;
+    this.aimCharDir(b.spine01, b.spine, Math.sin(walkPhase) * 0.06, 0.94, crouch + 0.14);
+
+    const s = Math.sin(walkPhase) * (sneaking ? 0.36 : 0.55);
+    this.aimCharDir(b.leftUpLeg, b.leftLeg, 0.10, -0.94 + crouch * 0.3, s + crouch * 0.4);
+    this.aimCharDir(b.rightUpLeg, b.rightLeg, -0.10, -0.94 + crouch * 0.3, -s + crouch * 0.4);
+    this.aimCharDir(b.leftLeg, b.leftFoot, 0.03, -0.94, -Math.max(0, -s) * 0.45 - crouch * 0.35);
+    this.aimCharDir(b.rightLeg, b.rightFoot, -0.03, -0.94, -Math.max(0, s) * 0.45 - crouch * 0.35);
+
+    if (hasWeights) {
+      this.aimCharDir(b.leftArm, b.leftForeArm, 0.42, -0.90, 0.15);
+      this.aimCharDir(b.rightArm, b.rightForeArm, -0.42, -0.90, 0.15);
+      this.aimCharDir(b.leftForeArm, b.leftHand, -0.05, -0.55, 0.78);
+      this.aimCharDir(b.rightForeArm, b.rightHand, 0.05, -0.55, 0.78);
+    } else {
+      this.aimCharDir(b.leftArm, b.leftForeArm, 0.34, -0.84, -s * 0.4 + 0.25);
+      this.aimCharDir(b.rightArm, b.rightForeArm, -0.34, -0.84, s * 0.4 + 0.25);
+      this.aimCharDir(b.leftForeArm, b.leftHand, -0.12, 0.28, 0.92);
+      this.aimCharDir(b.rightForeArm, b.rightHand, 0.12, 0.28, 0.92);
+    }
+
+    this.alignStandingFloor(baseFloorY);
+  }
+
+  /** Selfie Pump Pose (`flexT` 0..1, `phoneHold`). */
+  poseSelfieFlex(flexT: number, phoneHold: boolean, baseFloorY = 0): void {
+    const b = this.bones;
+    this.resetToBindPose();
+    this.setGrip(1.0);
+
+    this.aimCharDir(b.spine01, b.spine, -0.12, 0.98, -0.08 * flexT);
+    this.aimCharDir(b.leftUpLeg, b.leftLeg, 0.14, -0.98, 0.06);
+    this.aimCharDir(b.rightUpLeg, b.rightLeg, -0.14, -0.98, 0.06);
+
+    if (phoneHold) {
+      this.aimCharDir(b.leftArm, b.leftForeArm, 0.35, -0.45, 0.78);
+      this.aimCharDir(b.leftForeArm, b.leftHand, -0.15, 0.72, 0.65);
+    } else {
+      this.aimCharDir(b.leftArm, b.leftForeArm, 0.46, -0.78, 0.30);
+      this.aimCharDir(b.leftForeArm, b.leftHand, -0.25, 0.45, 0.78);
+    }
+    this.aimCharDir(b.rightArm, b.rightForeArm, -0.90, 0.06 + flexT * 0.15, 0.22);
+    this.aimCharDir(b.rightForeArm, b.rightHand, 0.48, 0.86, 0.18);
+
+    this.alignStandingFloor(baseFloorY);
   }
 }
 

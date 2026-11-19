@@ -184,10 +184,11 @@ export const BenchPressGame: React.FC<BenchPressGameProps> = ({
         rig.poseBenchPress(barLiftCurrentRef.current);
         if (rig.bones.spine) {
           rig.bones.spine.getWorldPosition(tmpShoulderPos);
-          benchOffsetZ = 0.05 - tmpShoulderPos.z;
+          benchOffsetZ = 0.12 - tmpShoulderPos.z;
           benchOffsetY = 0.72 - tmpShoulderPos.y;
         }
         rig.root.position.set(0, benchOffsetY, benchOffsetZ);
+        rig.poseBenchPress(barLiftCurrentRef.current, 0.96 + barLiftCurrentRef.current * 0.2, 0.05);
         scene.add(rig.root);
         glbLifter = rig;
         lifter.root.visible = false;

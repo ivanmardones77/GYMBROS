@@ -17,7 +17,27 @@ interface HonorMedalsShowcaseProps {
 
 const MEDAL_THEME: Record<
   HonorMedalId,
-  { accent: string; ring: string; bg: string; glyph: 'anvil' | 'bolt' | 'fist' | 'leaf' | 'pillar' | 'storm' }
+  {
+    accent: string;
+    ring: string;
+    bg: string;
+    glyph:
+      | 'anvil'
+      | 'bolt'
+      | 'fist'
+      | 'leaf'
+      | 'pillar'
+      | 'storm'
+      | 'barbell'
+      | 'crown_bar'
+      | 'radar'
+      | 'oar'
+      | 'diamond'
+      | 'lotus'
+      | 'eye'
+      | 'shutter'
+      | 'mask';
+  }
 > = {
   medal_titan_bench: {
     accent: 'text-orange-400',
@@ -54,6 +74,60 @@ const MEDAL_THEME: Record<
     ring: 'border-violet-400/45',
     bg: 'bg-violet-500/12',
     glyph: 'storm',
+  },
+  medal_deadlift_king: {
+    accent: 'text-red-400',
+    ring: 'border-red-500/45',
+    bg: 'bg-red-500/12',
+    glyph: 'barbell',
+  },
+  medal_bar_master: {
+    accent: 'text-yellow-300',
+    ring: 'border-yellow-400/45',
+    bg: 'bg-yellow-500/12',
+    glyph: 'crown_bar',
+  },
+  medal_phantom_reflex: {
+    accent: 'text-cyan-300',
+    ring: 'border-cyan-400/45',
+    bg: 'bg-cyan-500/12',
+    glyph: 'radar',
+  },
+  medal_iron_engine: {
+    accent: 'text-blue-400',
+    ring: 'border-blue-400/45',
+    bg: 'bg-blue-500/12',
+    glyph: 'oar',
+  },
+  medal_core_statue: {
+    accent: 'text-fuchsia-300',
+    ring: 'border-fuchsia-400/45',
+    bg: 'bg-fuchsia-500/12',
+    glyph: 'diamond',
+  },
+  medal_zen_alchemist: {
+    accent: 'text-teal-300',
+    ring: 'border-teal-400/45',
+    bg: 'bg-teal-500/12',
+    glyph: 'lotus',
+  },
+  medal_monk_focus: {
+    accent: 'text-pink-300',
+    ring: 'border-pink-400/45',
+    bg: 'bg-pink-500/12',
+    glyph: 'eye',
+  },
+  medal_mirror_stealth: {
+    accent: 'text-purple-300',
+    ring: 'border-purple-400/45',
+    bg: 'bg-purple-500/12',
+    glyph: 'shutter',
+  },
+  medal_gym_hustler: {
+    accent: 'text-amber-300',
+    ring: 'border-amber-400/45',
+    bg: 'bg-amber-500/12',
+    glyph: 'mask',
   },
 };
 
@@ -128,6 +202,60 @@ export const HonorMedalCrest: React.FC<{
         <path
           d="M15 24c2.5-3.2 5.2-3.2 7.5 0s4.5 3.2 6.5 0v3.2c-2.2 2.8-4.8 2.8-7-.2-2-2.6-4.4-2.6-7 .2V24zm0-5c2.5-2.8 5.2-2.8 7.5 0s4.5 2.8 6.5 0v2.5c-2.2 2.4-4.8 2.4-7-.2-2-2.2-4.4-2.2-7 .2V19z"
           fill={unlocked ? '#C4B5FD' : '#52525B'}
+        />
+      )}
+      {theme.glyph === 'barbell' && (
+        <path
+          d="M14 23h16v3H14v-3zm1-5h2.5v13H15V18zm11.5 0H29v13h-2.5V18z"
+          fill={unlocked ? '#F87171' : '#52525B'}
+        />
+      )}
+      {theme.glyph === 'crown_bar' && (
+        <path
+          d="M14 19h16v2.5H14V19zm3 2.5h2.5v10H17v-10zm7.5 0H27v10h-2.5v-10zM22 14l2.5 4h-5l2.5-4z"
+          fill={unlocked ? '#FDE047' : '#52525B'}
+        />
+      )}
+      {theme.glyph === 'radar' && (
+        <path
+          d="M22 16a8 8 0 100 16 8 8 0 000-16zm0 3.5a4.5 4.5 0 110 9 4.5 4.5 0 010-9zm0 3a1.5 1.5 0 100 3 1.5 1.5 0 000-3z"
+          fill={unlocked ? '#67E8F9' : '#52525B'}
+        />
+      )}
+      {theme.glyph === 'oar' && (
+        <path
+          d="M27.5 16.5L19 25l-2.5 5 5-2.5 8.5-8.5-2.5-2.5z"
+          fill={unlocked ? '#60A5FA' : '#52525B'}
+        />
+      )}
+      {theme.glyph === 'diamond' && (
+        <path
+          d="M22 15l7 9-7 9-7-9 7-9z"
+          fill={unlocked ? '#E879F9' : '#52525B'}
+        />
+      )}
+      {theme.glyph === 'lotus' && (
+        <path
+          d="M22 16c2.5 3.5 3 7 0 11-3-4-2.5-7.5 0-11zm-6.5 4c2.8 1.2 4.5 3.8 4 7.5-3.2-1-4.8-3.6-4-7.5zm13 0c.8 3.9-.8 6.5-4 7.5-.5-3.7 1.2-6.3 4-7.5z"
+          fill={unlocked ? '#5EEAD4' : '#52525B'}
+        />
+      )}
+      {theme.glyph === 'eye' && (
+        <path
+          d="M13 24c2.5-4 5.8-6 9-6s6.5 2 9 6c-2.5 4-5.8 6-9 6s-6.5-2-9-6zm9-2.5a2.5 2.5 0 100 5 2.5 2.5 0 000-5z"
+          fill={unlocked ? '#F472B6' : '#52525B'}
+        />
+      )}
+      {theme.glyph === 'shutter' && (
+        <path
+          d="M15 20h14a2 2 0 012 2v8a2 2 0 01-2 2H15a2 2 0 01-2-2v-8a2 2 0 012-2zm7 2.5a3.5 3.5 0 100 7 3.5 3.5 0 000-7zM18 17h8l1.5 3h-11L18 17z"
+          fill={unlocked ? '#C084FC' : '#52525B'}
+        />
+      )}
+      {theme.glyph === 'mask' && (
+        <path
+          d="M13 21c2.8-2 6-2 9 0 3-2 6.2-2 9 0l-1 5c-1.5 3-4.5 4.5-8 2-3.5 2.5-6.5 1-8-2l-1-5zm4 2.5a1.5 1.5 0 103 0 1.5 1.5 0 00-3 0zm8 0a1.5 1.5 0 103 0 1.5 1.5 0 00-3 0z"
+          fill={unlocked ? '#FBBF24' : '#52525B'}
         />
       )}
     </svg>

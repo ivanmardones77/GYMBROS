@@ -1,5 +1,31 @@
 import React from 'react';
-import { Activity, Apple, ArrowDownUp, Dumbbell, Footprints, Target, Waves, Zap } from 'lucide-react';
+import {
+  Activity,
+  Anchor,
+  Apple,
+  ArrowDownUp,
+  ArrowUpFromLine,
+  Camera,
+  CircleDot,
+  CupSoda,
+  Disc,
+  Dumbbell,
+  EyeOff,
+  Flame,
+  Footprints,
+  Gauge,
+  HeartPulse,
+  LayoutGrid,
+  MoveRight,
+  Scale,
+  Shield,
+  Smile,
+  Sparkles,
+  Target,
+  UserX,
+  Waves,
+  Zap,
+} from 'lucide-react';
 import { MinigameId } from '../types/game';
 
 export const GAME_ICONS: Record<string, React.ComponentType<{ className?: string; strokeWidth?: number }>> = {
@@ -10,13 +36,32 @@ export const GAME_ICONS: Record<string, React.ComponentType<{ className?: string
   squats: ArrowDownUp,
   rope: Activity,
   battle_ropes: Waves,
+  deadlift: Scale,
+  pullups: ArrowUpFromLine,
+  tire_flip: Disc,
+  agility_ladder: LayoutGrid,
+  dodge_counter: Shield,
+  wall_ball: CircleDot,
+  rowing: Anchor,
+  plank_core: Gauge,
+  sled_push: MoveRight,
+  shake_mixer: CupSoda,
+  mobility_flow: HeartPulse,
+  tunnel_vision: EyeOff,
+  mirror_posing: Sparkles,
+  dumbbell_heist: Flame,
+  ego_lifting: Smile,
+  pump_selfie: Camera,
+  dodge_chat: UserX,
 };
 
 export const CATEGORY_TINT: Record<string, string> = {
   Fuerza: 'from-orange-500/25',
   Cardio: 'from-sky-400/20',
   Combate: 'from-rose-500/25',
+  Agilidad: 'from-cyan-400/20',
   Nutrición: 'from-emerald-400/20',
+  Picardía: 'from-fuchsia-500/25',
 };
 
 interface GameCardProps {

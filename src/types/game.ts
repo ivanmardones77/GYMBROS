@@ -11,7 +11,24 @@ export type MinigameId =
   | 'macros'
   | 'squats'
   | 'rope'
-  | 'battle_ropes';
+  | 'battle_ropes'
+  | 'deadlift'
+  | 'pullups'
+  | 'tire_flip'
+  | 'agility_ladder'
+  | 'dodge_counter'
+  | 'wall_ball'
+  | 'rowing'
+  | 'plank_core'
+  | 'sled_push'
+  | 'shake_mixer'
+  | 'mobility_flow'
+  | 'tunnel_vision'
+  | 'mirror_posing'
+  | 'dumbbell_heist'
+  | 'ego_lifting'
+  | 'pump_selfie'
+  | 'dodge_chat';
 
 export type DifficultyLevel = 1 | 2 | 3 | 4 | 5;
 
@@ -38,7 +55,16 @@ export type HonorMedalId =
   | 'medal_ko_precision'
   | 'medal_zero_junk'
   | 'medal_iron_legs'
-  | 'medal_cardio_storm';
+  | 'medal_cardio_storm'
+  | 'medal_deadlift_king'
+  | 'medal_bar_master'
+  | 'medal_phantom_reflex'
+  | 'medal_iron_engine'
+  | 'medal_core_statue'
+  | 'medal_zen_alchemist'
+  | 'medal_monk_focus'
+  | 'medal_mirror_stealth'
+  | 'medal_gym_hustler';
 
 export interface HonorMedalUnlockRecord {
   unlockedAt: string;

@@ -429,7 +429,7 @@ export function disposeScene(scene: THREE.Scene, renderer: THREE.WebGLRenderer):
 const gltfCache = new Map<string, Promise<GLTF>>();
 
 const M = (f: string) => `${import.meta.env.BASE_URL}models/${f}.glb`;
-const MA = (f: string) => `${import.meta.env.BASE_URL}models/${f}.glb?rig=4`;
+const MA = (f: string) => `${import.meta.env.BASE_URL}models/${f}.glb?rig=5`;
 export const MODEL_URLS = {
   bench: M('bench'),
   bag: M('bag'),

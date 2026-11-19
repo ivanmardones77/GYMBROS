@@ -92,7 +92,6 @@ export const Athlete3DViewer: React.FC<Athlete3DViewerProps> = ({
 
   const rigRef = useRef<AthleteRigParts | null>(null);
   const aiRootRef = useRef<THREE.Group | null>(null);
-  const aiMixerRef = useRef<THREE.AnimationMixer | null>(null);
   const aiRigRef = useRef<GlbPoseRig | null>(null);
   const aiAccRef = useRef<GlbAccessories | null>(null);
   const unmountedFlag = useRef(false);
@@ -409,7 +408,6 @@ export const Athlete3DViewer: React.FC<Athlete3DViewerProps> = ({
       if (unmounted) return;
       const dt = Math.min(0.05, Math.max(0.001, clock.getDelta()));
       elapsed += dt;
-      aiMixerRef.current?.update(dt);
 
       const rig = rigRef.current;
       const cur = propsRef.current;
@@ -617,7 +615,6 @@ export const Athlete3DViewer: React.FC<Athlete3DViewerProps> = ({
       unmounted = true;
       unmountedFlag.current = true;
       aiRootRef.current = null;
-      aiMixerRef.current = null;
       aiRigRef.current = null;
       aiAccRef.current = null;
       controlsRef.current = null;
@@ -669,7 +666,6 @@ export const Athlete3DViewer: React.FC<Athlete3DViewerProps> = ({
         disposeObject3D(aiRootRef.current);
         aiRootRef.current = null;
       }
-      aiMixerRef.current = null;
       aiRigRef.current = null;
     };
 
@@ -682,7 +678,7 @@ export const Athlete3DViewer: React.FC<Athlete3DViewerProps> = ({
     if (!aiRootRef.current) setAiLoading(true);
 
     loadGlbAsset(aiUrl, gender === 'female' ? 1.68 : 1.8, { cloneMaterials: true })
-      .then(({ root, animations }) => {
+      .then(({ root }) => {
         if (cancelled || unmountedFlag.current || sceneRef.current !== scene) {
           disposeObject3D(root);
           return;
@@ -693,17 +689,18 @@ export const Athlete3DViewer: React.FC<Athlete3DViewerProps> = ({
         const initScale = computeRealisticScale(fitnessScore);
         root.scale.set(initScale.sx, initScale.sy, initScale.sz);
 
-        aiRigRef.current = new GlbPoseRig(root);
+        const rig = new GlbPoseRig(root);
+        rig.applyViewerPoseOverlay(
+          propsRef.current.pose === 'flex' ? 1 : 0,
+          propsRef.current.pose === 'tired' || propsRef.current.energy < 25 ? 1 : 0,
+          0
+        );
+        aiRigRef.current = rig;
 
         applyAiMaterialState(root, propsRef.current.outfit, propsRef.current.hasBuff);
         scene.add(root);
         aiRootRef.current = root;
         if (rigRef.current) rigRef.current.root.visible = false;
-        if (animations.length) {
-          const mixer = new THREE.AnimationMixer(root);
-          mixer.clipAction(animations[0]).play();
-          aiMixerRef.current = mixer;
-        }
       })
       .catch(() => {
         setAiLoading(false);

@@ -184,7 +184,7 @@ export const TreadmillSprintGame: React.FC<TreadmillSprintGameProps> = ({
       onLoaded: (rig) => {
         rig.root.rotation.y = Math.PI;
         rig.root.position.set(0, 0.09, 0.8);
-        rig.poseSprint(0, false, 0, speedRef.current, 0.09);
+        rig.poseSprint(stridePhaseRef.current, false, 0, speedRef.current, 0.09);
         scene.add(rig.root);
         glbRunner = rig;
         runner.root.visible = false;
@@ -266,26 +266,27 @@ export const TreadmillSprintGame: React.FC<TreadmillSprintGameProps> = ({
       }
 
       stridePhaseRef.current += dt * (4 + speedRef.current * 0.65);
-      const swing = isJumpingRef.current ? 0.55 : Math.sin(stridePhaseRef.current) * 0.72;
+      const pL = stridePhaseRef.current;
+      const pR = pL + Math.PI;
+      const swing = isJumpingRef.current ? 0.68 : Math.sin(pL) * 0.78;
       if (glbRunner) {
-        glbRunner.poseSprint(swing, isJumpingRef.current, jumpHeightRef.current, speedRef.current, 0.09);
+        glbRunner.poseSprint(pL, isJumpingRef.current, jumpHeightRef.current, speedRef.current, 0.09);
       } else {
-        runner.root.position.y = 0.09 + jumpHeightRef.current;
-        runner.leftLegPivot.rotation.x = swing;
-        runner.rightLegPivot.rotation.x = -swing;
-        runner.leftKneePivot.rotation.x = isJumpingRef.current
-          ? 0.95
-          : Math.max(0.05, -swing * 0.85);
-        runner.rightKneePivot.rotation.x = isJumpingRef.current
-          ? 0.95
-          : Math.max(0.05, swing * 0.85);
-        runner.leftArmPivot.rotation.x = -swing * 0.85;
-        runner.rightArmPivot.rotation.x = swing * 0.85;
-        runner.leftForearmPivot.rotation.x = -0.95;
-        runner.rightForearmPivot.rotation.x = -0.95;
-        runner.upperBody.rotation.x = 0.14 + Math.min(0.18, speedRef.current * 0.008);
+        const bounce = isJumpingRef.current ? 0 : Math.pow(Math.abs(Math.sin(pL + 0.2)), 1.5) * 0.04;
+        runner.root.position.y = 0.09 + jumpHeightRef.current + bounce;
+        runner.leftLegPivot.rotation.x = isJumpingRef.current ? 0.85 : swing;
+        runner.rightLegPivot.rotation.x = isJumpingRef.current ? -0.35 : -swing;
+        const recL = 0.5 + 0.5 * Math.cos(pL + 0.65);
+        const recR = 0.5 + 0.5 * Math.cos(pR + 0.65);
+        runner.leftKneePivot.rotation.x = isJumpingRef.current ? 0.95 : 0.25 + 1.45 * recL;
+        runner.rightKneePivot.rotation.x = isJumpingRef.current ? 1.45 : 0.25 + 1.45 * recR;
+        runner.leftArmPivot.rotation.x = -swing * 0.9;
+        runner.rightArmPivot.rotation.x = swing * 0.9;
+        runner.leftForearmPivot.rotation.x = -1.25;
+        runner.rightForearmPivot.rotation.x = -1.25;
+        runner.upperBody.rotation.x = 0.16 + Math.min(0.18, speedRef.current * 0.008);
         if (runner.ponytailGroup) {
-          runner.ponytailGroup.rotation.x = 0.18 + Math.abs(Math.sin(stridePhaseRef.current)) * 0.25;
+          runner.ponytailGroup.rotation.x = 0.18 + Math.abs(Math.sin(pL)) * 0.25;
         }
         runner.shadowMesh.scale.setScalar(Math.max(0.45, 1 - jumpHeightRef.current * 0.5));
       }
