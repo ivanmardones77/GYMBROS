@@ -251,7 +251,7 @@ export const TireFlipGame: React.FC<TireFlipGameProps> = ({
       hairColor: athlete?.hairColor ?? '#1C1C1C',
       outfit: athlete?.outfit ?? 'pro',
     });
-    athleteRig.root.position.set(0, 0.03, -0.15);
+    athleteRig.root.position.set(0, 0.03, -0.44);
     scene.add(athleteRig.root);
 
     let glbRig: GlbPoseRig | null = null;
@@ -263,8 +263,8 @@ export const TireFlipGame: React.FC<TireFlipGameProps> = ({
       aiModel,
       isCancelled: () => unmountedRef.current,
       onLoaded: (rig) => {
-        rig.root.position.set(0, 0.03, -0.15);
-        rig.poseTireFlip(0, 0.03);
+        rig.root.position.set(0, 0.03, -0.44);
+        rig.poseTireFlip(0, 0.03, 0);
         scene.add(rig.root);
         glbRig = rig;
         athleteRig.root.visible = false;
@@ -310,7 +310,7 @@ export const TireFlipGame: React.FC<TireFlipGameProps> = ({
 
       const stageT = stageRef.current === 'catch' ? 0.05 : Math.min(1, driveProgressRef.current * 1.15);
       if (glbRig) {
-        glbRig.poseTireFlip(stageT, 0.03);
+        glbRig.poseTireFlip(stageT, 0.03, tireAngleRef.current);
       } else {
         athleteRig.upperBody.rotation.x = THREE.MathUtils.lerp(0.75, 0.25, stageT);
         athleteRig.leftArmPivot.rotation.x = THREE.MathUtils.lerp(-0.9, -1.5, stageT);

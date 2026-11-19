@@ -139,8 +139,8 @@ export const DumbbellHeistGame: React.FC<DumbbellHeistGameProps> = ({
     const h = Math.max(1, container.clientHeight);
     const aspect = w / h;
     const camera = new THREE.PerspectiveCamera(42, aspect, 0.1, 45);
-    camera.position.set(2.55, 1.55, computeResponsiveCameraZ(3.6, aspect, 1.0));
-    camera.lookAt(0, 0.88, 0.75);
+    camera.position.set(2.55, 1.58, computeResponsiveCameraZ(3.95, aspect, 1.02));
+    camera.lookAt(0.15, 0.92, 0.55);
 
     createThreePointLights(scene, 6);
     addGymDecor(scene, ['bench', 'squatRack'], { isCancelled: () => unmountedRef.current });
@@ -163,10 +163,43 @@ export const DumbbellHeistGame: React.FC<DumbbellHeistGameProps> = ({
     rackShelf.castShadow = true;
     rackGroup.add(rackShelf);
 
-    const prizeMat = new THREE.MeshStandardMaterial({ color: 0xf59e0b, emissive: 0xf59e0b, emissiveIntensity: 0.45 });
-    const prizePair = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.16, 0.22), prizeMat);
-    prizePair.position.set(0, 0.8, 0);
+    const buildGoldDumbbell = () => {
+      const g = new THREE.Group();
+      const handleMat = new THREE.MeshStandardMaterial({ color: 0xfde047, metalness: 0.85, roughness: 0.22 });
+      const headMat = new THREE.MeshStandardMaterial({
+        color: 0xf59e0b,
+        emissive: 0xf59e0b,
+        emissiveIntensity: 0.35,
+        metalness: 0.65,
+        roughness: 0.28,
+      });
+      const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.018, 0.26, 12), handleMat);
+      shaft.castShadow = true;
+      g.add(shaft);
+      for (const sgn of [-1, 1]) {
+        const bell = new THREE.Mesh(new THREE.CylinderGeometry(0.072, 0.072, 0.08, 6), headMat);
+        bell.position.y = sgn * 0.11;
+        bell.castShadow = true;
+        g.add(bell);
+      }
+      return g;
+    };
+
+    const prizePair = new THREE.Group();
+    const rackDbL = buildGoldDumbbell();
+    rackDbL.rotation.z = Math.PI / 2;
+    rackDbL.position.set(-0.22, 0.79, 0);
+    const rackDbR = buildGoldDumbbell();
+    rackDbR.rotation.z = Math.PI / 2;
+    rackDbR.position.set(0.22, 0.79, 0);
+    prizePair.add(rackDbL, rackDbR);
     rackGroup.add(prizePair);
+
+    const heldDbL = buildGoldDumbbell();
+    const heldDbR = buildGoldDumbbell();
+    heldDbL.visible = false;
+    heldDbR.visible = false;
+    scene.add(heldDbL, heldDbR);
 
     // Gym Bro Guard beside rack
     const broRig = buildAthleteModel({
@@ -180,10 +213,18 @@ export const DumbbellHeistGame: React.FC<DumbbellHeistGameProps> = ({
     broRig.root.rotation.y = -0.35;
     scene.add(broRig.root);
 
-    const phoneGlowMat = new THREE.MeshBasicMaterial({ color: 0x38bdf8 });
-    const phoneMesh = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.22, 0.03), phoneGlowMat);
-    phoneMesh.position.set(0.85, 1.25, 1.55);
-    scene.add(phoneMesh);
+    const phoneGroup = new THREE.Group();
+    const phoneBody = new THREE.Mesh(
+      new THREE.BoxGeometry(0.085, 0.16, 0.014),
+      new THREE.MeshStandardMaterial({ color: 0x0f172a, roughness: 0.3, metalness: 0.6 })
+    );
+    const phoneScreen = new THREE.Mesh(
+      new THREE.PlaneGeometry(0.072, 0.14),
+      new THREE.MeshBasicMaterial({ color: 0x38bdf8 })
+    );
+    phoneScreen.position.z = 0.008;
+    phoneGroup.add(phoneBody, phoneScreen);
+    scene.add(phoneGroup);
 
     const thiefRig = buildAthleteModel({
       gender: athlete?.gender ?? 'male',
@@ -218,11 +259,17 @@ export const DumbbellHeistGame: React.FC<DumbbellHeistGameProps> = ({
       const ch = Math.max(1, container.clientHeight);
       const nextAsp = cw / ch;
       camera.aspect = nextAsp;
-      camera.position.z = computeResponsiveCameraZ(3.6, nextAsp, 1.0);
+      camera.position.z = computeResponsiveCameraZ(3.95, nextAsp, 1.02);
       camera.updateProjectionMatrix();
       renderer.setSize(cw, ch);
     });
     resizeObserver.observe(container);
+
+    const tmpPos = new THREE.Vector3();
+    const tmpAxis = new THREE.Vector3();
+    const tmpPhonePos = new THREE.Vector3();
+    const yAxis = new THREE.Vector3(0, 1, 0);
+    const xAxis = new THREE.Vector3(1, 0, 0);
 
     let last = performance.now();
     let frameId = 0;
@@ -248,9 +295,22 @@ export const DumbbellHeistGame: React.FC<DumbbellHeistGameProps> = ({
         }
       }
 
-      phoneMesh.visible = !broLookingRef.current;
-      broRig.headGroup.rotation.x = broLookingRef.current ? 0 : 0.45;
-      broRig.headGroup.rotation.y = broLookingRef.current ? -0.85 : 0;
+      const looking = broLookingRef.current;
+      broRig.root.rotation.y = THREE.MathUtils.damp(broRig.root.rotation.y, looking ? -1.25 : -0.35, 10, dt);
+      broRig.headGroup.rotation.x = THREE.MathUtils.damp(broRig.headGroup.rotation.x, looking ? -0.05 : 0.42, 10, dt);
+      broRig.headGroup.rotation.y = THREE.MathUtils.damp(broRig.headGroup.rotation.y, looking ? -0.45 : 0, 10, dt);
+      broRig.leftArmPivot.rotation.x = THREE.MathUtils.damp(broRig.leftArmPivot.rotation.x, looking ? -0.1 : -0.78, 10, dt);
+      broRig.rightArmPivot.rotation.x = THREE.MathUtils.damp(broRig.rightArmPivot.rotation.x, looking ? -0.1 : -0.78, 10, dt);
+      broRig.leftForearmPivot.rotation.x = THREE.MathUtils.damp(broRig.leftForearmPivot.rotation.x, looking ? -0.25 : -1.05, 10, dt);
+      broRig.rightForearmPivot.rotation.x = THREE.MathUtils.damp(broRig.rightForearmPivot.rotation.x, looking ? -0.25 : -1.05, 10, dt);
+      broRig.leftArmPivot.rotation.z = looking ? -0.22 : 0.14;
+      broRig.rightArmPivot.rotation.z = looking ? 0.22 : -0.14;
+
+      broRig.root.updateMatrixWorld(true);
+      broRig.rightForearmPivot.localToWorld(tmpPhonePos.set(-0.08, -0.30, 0.06));
+      phoneGroup.position.copy(tmpPhonePos);
+      phoneGroup.rotation.set(-0.55, broRig.root.rotation.y + Math.PI, 0);
+      phoneGroup.visible = !looking;
 
       if (movingRef.current) {
         if (broLookingRef.current && bustedCooldownRef.current <= 0) {
@@ -315,15 +375,37 @@ export const DumbbellHeistGame: React.FC<DumbbellHeistGameProps> = ({
       const facingY = heistPhaseRef.current === 'return' ? Math.PI : 0;
       const hasWeights = heistPhaseRef.current === 'return';
 
+      heldDbL.visible = hasWeights;
+      heldDbR.visible = hasWeights;
+
       if (glbRig) {
         glbRig.root.position.z = zPos;
         glbRig.root.rotation.y = facingY;
         glbRig.poseStealthCarry(walkPhaseRef.current, !hasWeights, hasWeights, 0);
+        if (hasWeights) {
+          glbRig.getGripTransform('left', tmpPos, tmpAxis);
+          heldDbL.position.copy(tmpPos);
+          heldDbL.quaternion.setFromUnitVectors(yAxis, tmpAxis.lengthSq() > 0.01 ? tmpAxis : xAxis);
+          glbRig.getGripTransform('right', tmpPos, tmpAxis);
+          heldDbR.position.copy(tmpPos);
+          heldDbR.quaternion.setFromUnitVectors(yAxis, tmpAxis.lengthSq() > 0.01 ? tmpAxis : xAxis);
+        }
       } else {
         thiefRig.root.position.z = zPos;
         thiefRig.root.rotation.y = facingY;
         thiefRig.leftLegPivot.rotation.x = Math.sin(walkPhaseRef.current) * 0.45;
         thiefRig.rightLegPivot.rotation.x = -Math.sin(walkPhaseRef.current) * 0.45;
+        if (hasWeights) {
+          thiefRig.leftArmPivot.rotation.x = -0.35;
+          thiefRig.rightArmPivot.rotation.x = -0.35;
+          thiefRig.leftForearmPivot.rotation.x = -0.75;
+          thiefRig.rightForearmPivot.rotation.x = -0.75;
+          thiefRig.root.updateMatrixWorld(true);
+          thiefRig.leftForearmPivot.localToWorld(heldDbL.position.set(0, -0.295, 0.005));
+          thiefRig.rightForearmPivot.localToWorld(heldDbR.position.set(0, -0.295, 0.005));
+          heldDbL.rotation.set(Math.PI / 2, 0, 0);
+          heldDbR.rotation.set(Math.PI / 2, 0, 0);
+        }
       }
 
       renderer.render(scene, camera);

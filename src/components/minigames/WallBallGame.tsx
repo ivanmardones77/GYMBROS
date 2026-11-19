@@ -218,7 +218,7 @@ export const WallBallGame: React.FC<WallBallGameProps> = ({
     const h = Math.max(1, container.clientHeight);
     const aspect = w / h;
     const camera = new THREE.PerspectiveCamera(44, aspect, 0.1, 45);
-    camera.position.set(1.95, 1.85, -computeResponsiveCameraZ(3.6, aspect, 1.0));
+    camera.position.set(1.95, 1.85, -computeResponsiveCameraZ(3.9, aspect, 1.0));
     camera.lookAt(0, 1.55, 0.9);
 
     createThreePointLights(scene, 6);
@@ -310,11 +310,14 @@ export const WallBallGame: React.FC<WallBallGameProps> = ({
       const ch = Math.max(1, container.clientHeight);
       const nextAsp = cw / ch;
       camera.aspect = nextAsp;
-      camera.position.z = -computeResponsiveCameraZ(3.6, nextAsp, 1.0);
+      camera.position.z = -computeResponsiveCameraZ(3.9, nextAsp, 1.0);
       camera.updateProjectionMatrix();
       renderer.setSize(cw, ch);
     });
     resizeObserver.observe(container);
+
+    const tmpGripL = new THREE.Vector3();
+    const tmpGripR = new THREE.Vector3();
 
     let last = performance.now();
     let frameId = 0;
@@ -390,6 +393,12 @@ export const WallBallGame: React.FC<WallBallGameProps> = ({
 
       if (glbRig) {
         glbRig.poseWallBall(squatT, throwT, aimXRef.current, 0);
+        if (stageRef.current === 'ready') {
+          glbRig.getGripTransform('left', tmpGripL);
+          glbRig.getGripTransform('right', tmpGripR);
+          ball.position.addVectors(tmpGripL, tmpGripR).multiplyScalar(0.5);
+          ball.position.z += 0.04;
+        }
       } else {
         athleteRig.leftLegPivot.rotation.x = -squatT * 0.85;
         athleteRig.rightLegPivot.rotation.x = -squatT * 0.85;

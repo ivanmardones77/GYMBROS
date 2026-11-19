@@ -240,6 +240,12 @@ export const RowingGame: React.FC<RowingGameProps> = ({
     handleBar.rotation.z = Math.PI / 2;
     ergGroup.add(handleBar);
 
+    const cableLine = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.008, 0.008, 1, 8),
+      new THREE.MeshStandardMaterial({ color: 0xcbd5e1, metalness: 0.75, roughness: 0.3 })
+    );
+    ergGroup.add(cableLine);
+
     const rowerRig = buildAthleteModel({
       gender: athlete?.gender ?? 'male',
       fitnessScore: athlete?.fitnessScore ?? 65,
@@ -282,6 +288,10 @@ export const RowingGame: React.FC<RowingGameProps> = ({
     let last = performance.now();
     let frameId = 0;
 
+    const flywheelAnchor = new THREE.Vector3(0, 0.44, 0.92);
+    const cableDir = new THREE.Vector3();
+    const yAxis = new THREE.Vector3(0, 1, 0);
+
     const tick = (now: number) => {
       if (unmountedRef.current) return;
       const dt = Math.min(0.05, (now - last) / 1000);
@@ -314,12 +324,13 @@ export const RowingGame: React.FC<RowingGameProps> = ({
 
       const seatZ = THREE.MathUtils.lerp(0.18, -0.58, strokeRef.current);
       seat.position.z = seatZ;
-      handleBar.position.set(0, THREE.MathUtils.lerp(0.76, 0.84, strokeRef.current), THREE.MathUtils.lerp(0.55, -0.15, strokeRef.current));
 
       if (glbRig) {
         glbRig.root.position.z = seatZ;
-        glbRig.poseRowing(strokeRef.current, 0.42);
+        const synced = glbRig.poseRowing(strokeRef.current, 0.42);
+        handleBar.position.set(0, synced.handleY, synced.handleZ);
       } else {
+        handleBar.position.set(0, THREE.MathUtils.lerp(0.76, 0.84, strokeRef.current), seatZ + THREE.MathUtils.lerp(0.46, 0.14, strokeRef.current));
         rowerRig.root.position.z = seatZ;
         rowerRig.pelvisGroup.position.y = 0.44;
         rowerRig.upperBody.rotation.x = THREE.MathUtils.lerp(0.35, -0.25, strokeRef.current);
@@ -330,6 +341,12 @@ export const RowingGame: React.FC<RowingGameProps> = ({
         rowerRig.leftArmPivot.rotation.x = THREE.MathUtils.lerp(-1.1, -0.3, strokeRef.current);
         rowerRig.rightArmPivot.rotation.x = THREE.MathUtils.lerp(-1.1, -0.3, strokeRef.current);
       }
+
+      cableDir.subVectors(flywheelAnchor, handleBar.position);
+      const cableLen = Math.max(0.05, cableDir.length());
+      cableLine.position.addVectors(handleBar.position, flywheelAnchor).multiplyScalar(0.5);
+      cableLine.scale.set(1, cableLen, 1);
+      cableLine.quaternion.setFromUnitVectors(yAxis, cableDir.normalize());
 
       renderer.render(scene, camera);
       frameId = isSoftwareGl

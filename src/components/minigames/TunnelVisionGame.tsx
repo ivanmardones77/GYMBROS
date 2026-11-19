@@ -176,15 +176,15 @@ export const TunnelVisionGame: React.FC<TunnelVisionGameProps> = ({
     }
 
     const scene = new THREE.Scene();
-    dressGymScene(scene, { fogNear: 7.5, fogFar: 22 });
+    dressGymScene(scene, { fogNear: 9.5, fogFar: 26 });
     scene.environment = envMap;
 
     const w = Math.max(1, container.clientWidth);
     const h = Math.max(1, container.clientHeight);
     const aspect = w / h;
     const camera = new THREE.PerspectiveCamera(44, aspect, 0.1, 42);
-    camera.position.set(0, 1.55, computeResponsiveCameraZ(3.35, aspect, 1.0));
-    camera.lookAt(0, 1.12, 0.1);
+    camera.position.set(0, 1.66, computeResponsiveCameraZ(4.2, aspect, 1.05));
+    camera.lookAt(0, 1.06, -0.25);
 
     createThreePointLights(scene, 6);
     addGymDecor(scene, ['dumbbells', 'bench'], { isCancelled: () => unmountedRef.current });
@@ -197,7 +197,7 @@ export const TunnelVisionGame: React.FC<TunnelVisionGameProps> = ({
     floor.receiveShadow = true;
     scene.add(floor);
 
-    // Athlete + procedural dumbbells visually near hands
+    // Athlete + 3D Hex Dumbbells synced to gripped fists
     const athleteRig = buildAthleteModel({
       gender: athlete?.gender ?? 'male',
       fitnessScore: athlete?.fitnessScore ?? 65,
@@ -207,6 +207,29 @@ export const TunnelVisionGame: React.FC<TunnelVisionGameProps> = ({
     });
     athleteRig.root.position.set(0, 0, -0.15);
     scene.add(athleteRig.root);
+
+    const buildDumbbell = () => {
+      const g = new THREE.Group();
+      const handleMat = new THREE.MeshStandardMaterial({ color: 0xe2e8f0, metalness: 0.9, roughness: 0.22 });
+      const headMat = new THREE.MeshStandardMaterial({ color: 0x18181b, roughness: 0.55, metalness: 0.25 });
+      const trimMat = new THREE.MeshStandardMaterial({ color: 0xff5a1f, emissive: 0xff5a1f, emissiveIntensity: 0.2 });
+      const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.017, 0.017, 0.26, 12), handleMat);
+      shaft.castShadow = true;
+      g.add(shaft);
+      for (const sgn of [-1, 1]) {
+        const bell = new THREE.Mesh(new THREE.CylinderGeometry(0.068, 0.068, 0.075, 6), headMat);
+        bell.position.y = sgn * 0.11;
+        bell.castShadow = true;
+        g.add(bell);
+        const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.082, 6), trimMat);
+        cap.position.y = sgn * 0.11;
+        g.add(cap);
+      }
+      return g;
+    };
+    const dbLeft = buildDumbbell();
+    const dbRight = buildDumbbell();
+    scene.add(dbLeft, dbRight);
 
     let glbRig: GlbPoseRig | null = null;
     loadMinigameGlbAthlete({
@@ -225,7 +248,7 @@ export const TunnelVisionGame: React.FC<TunnelVisionGameProps> = ({
       },
     });
 
-    // Glamorous gym distractor silhouette passing left or right behind/beside
+    // Glamorous gym distractor walking cleanly beside athlete inside camera frame
     const distractor = buildAthleteModel({
       gender: 'female',
       fitnessScore: 92,
@@ -234,11 +257,11 @@ export const TunnelVisionGame: React.FC<TunnelVisionGameProps> = ({
       outfit: 'pro',
     });
     const auraRing = new THREE.Mesh(
-      new THREE.TorusGeometry(0.65, 0.035, 10, 28),
-      new THREE.MeshBasicMaterial({ color: 0xf472b6, transparent: true, opacity: 0.65 })
+      new THREE.TorusGeometry(0.55, 0.032, 10, 28),
+      new THREE.MeshBasicMaterial({ color: 0xf472b6, transparent: true, opacity: 0.72 })
     );
     auraRing.rotation.x = Math.PI / 2;
-    auraRing.position.y = 0.06;
+    auraRing.position.y = 0.05;
     distractor.root.add(auraRing);
     distractor.root.visible = false;
     scene.add(distractor.root);
@@ -249,11 +272,16 @@ export const TunnelVisionGame: React.FC<TunnelVisionGameProps> = ({
       const ch = Math.max(1, container.clientHeight);
       const nextAsp = cw / ch;
       camera.aspect = nextAsp;
-      camera.position.z = computeResponsiveCameraZ(3.35, nextAsp, 1.0);
+      camera.position.z = computeResponsiveCameraZ(4.2, nextAsp, 1.05);
       camera.updateProjectionMatrix();
       renderer.setSize(cw, ch);
     });
     resizeObserver.observe(container);
+
+    const tmpPos = new THREE.Vector3();
+    const tmpAxis = new THREE.Vector3();
+    const yAxis = new THREE.Vector3(0, 1, 0);
+    const xAxis = new THREE.Vector3(1, 0, 0);
 
     let last = performance.now();
     let frameId = 0;
@@ -277,18 +305,20 @@ export const TunnelVisionGame: React.FC<TunnelVisionGameProps> = ({
         const side = Math.random() < 0.5 ? 'left' : 'right';
         pullSideRef.current = side;
         setPullSide(side);
-        distractorWalkRef.current = -3.6;
+        distractorWalkRef.current = -2.35;
         distractor.root.visible = true;
       }
 
       if (pullSideRef.current !== 'none') {
-        distractorWalkRef.current += dt * (1.85 + difficulty * 0.25);
+        distractorWalkRef.current += dt * (1.25 + difficulty * 0.22);
         const dirSign = pullSideRef.current === 'right' ? 1 : -1;
-        distractor.root.position.set(dirSign * 1.35, 0, distractorWalkRef.current);
-        distractor.root.rotation.y = 0;
-        const step = distractorWalkRef.current * 4.5;
+        distractor.root.position.set(dirSign * 0.96, 0, distractorWalkRef.current);
+        distractor.root.rotation.y = -dirSign * 0.14;
+        const step = distractorWalkRef.current * 4.8;
         distractor.leftLegPivot.rotation.x = Math.sin(step) * 0.42;
         distractor.rightLegPivot.rotation.x = -Math.sin(step) * 0.42;
+        distractor.leftArmPivot.rotation.x = -Math.sin(step) * 0.28;
+        distractor.rightArmPivot.rotation.x = Math.sin(step) * 0.28;
 
         // Magnetic temptation pulling gaze toward distractor side!
         const pullForce = (0.72 + difficulty * 0.24) * cfg.speedMult;
@@ -306,11 +336,11 @@ export const TunnelVisionGame: React.FC<TunnelVisionGameProps> = ({
           sound.playMiss();
         }
 
-        if (distractorWalkRef.current >= 2.8) {
+        if (distractorWalkRef.current >= 1.15) {
           pullSideRef.current = 'none';
           setPullSide('none');
           distractor.root.visible = false;
-          distractorTimerRef.current = Math.max(0.7, 1.8 - difficulty * 0.2);
+          distractorTimerRef.current = Math.max(0.7, 1.7 - difficulty * 0.2);
         }
       }
 
@@ -330,10 +360,21 @@ export const TunnelVisionGame: React.FC<TunnelVisionGameProps> = ({
 
       if (glbRig) {
         glbRig.poseTunnelCurl(curlTRef.current, gazeRef.current, 0);
+        glbRig.getGripTransform('left', tmpPos, tmpAxis);
+        dbLeft.position.copy(tmpPos);
+        dbLeft.quaternion.setFromUnitVectors(yAxis, tmpAxis.lengthSq() > 0.01 ? tmpAxis : xAxis);
+        glbRig.getGripTransform('right', tmpPos, tmpAxis);
+        dbRight.position.copy(tmpPos);
+        dbRight.quaternion.setFromUnitVectors(yAxis, tmpAxis.lengthSq() > 0.01 ? tmpAxis : xAxis);
       } else {
         athleteRig.headGroup.rotation.y = gazeRef.current * 0.7;
         athleteRig.leftForearmPivot.rotation.x = -curlTRef.current * 1.65;
         athleteRig.rightForearmPivot.rotation.x = -curlTRef.current * 1.65;
+        athleteRig.root.updateMatrixWorld(true);
+        athleteRig.leftForearmPivot.localToWorld(dbLeft.position.set(0, -0.295, 0.005));
+        athleteRig.rightForearmPivot.localToWorld(dbRight.position.set(0, -0.295, 0.005));
+        dbLeft.rotation.set(0, 0, Math.PI / 2);
+        dbRight.rotation.set(0, 0, Math.PI / 2);
       }
 
       renderer.render(scene, camera);

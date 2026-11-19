@@ -42,6 +42,8 @@ interface TalkerEntity {
   z: number;
   resolved: boolean;
   mesh: THREE.Group;
+  rig: ReturnType<typeof buildAthleteModel>;
+  phaseOffset: number;
 }
 
 export const DodgeChatGame: React.FC<DodgeChatGameProps> = ({
@@ -231,7 +233,7 @@ export const DodgeChatGame: React.FC<DodgeChatGameProps> = ({
       isCancelled: () => unmountedRef.current,
       onLoaded: (rig) => {
         rig.root.position.set(0, 0, -0.25);
-        rig.poseStealthCarry(0, false, false, 0);
+        rig.poseSprint(0, false, 0, 9.0, 0);
         scene.add(rig.root);
         glbRig = rig;
         runnerRig.root.visible = false;
@@ -249,6 +251,15 @@ export const DodgeChatGame: React.FC<DodgeChatGameProps> = ({
         outfit: 'basic',
       });
       chatNpc.root.rotation.y = Math.PI;
+      // Bright orange protein tub carried in left hand
+      const tub = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.085, 0.08, 0.20, 14),
+        new THREE.MeshStandardMaterial({ color: 0xff5a1f, roughness: 0.35 })
+      );
+      tub.position.set(0, -0.295, 0.04);
+      chatNpc.leftForearmPivot.add(tub);
+      chatNpc.leftArmPivot.rotation.x = -0.35;
+      chatNpc.leftForearmPivot.rotation.x = -0.85;
       g.add(chatNpc.root);
 
       // Floating yellow "Speech Trap" aura ring on floor
@@ -263,7 +274,14 @@ export const DodgeChatGame: React.FC<DodgeChatGameProps> = ({
       const startZ = 12.0;
       g.position.set(LANE_X[targetLane], 0, startZ);
       scene.add(g);
-      talkersRef.current.push({ lane: targetLane, z: startZ, resolved: false, mesh: g });
+      talkersRef.current.push({
+        lane: targetLane,
+        z: startZ,
+        resolved: false,
+        mesh: g,
+        rig: chatNpc,
+        phaseOffset: Math.random() * Math.PI * 2,
+      });
     };
 
     const resizeObserver = new ResizeObserver(() => {
@@ -316,6 +334,11 @@ export const DodgeChatGame: React.FC<DodgeChatGameProps> = ({
         for (const t of talkersRef.current) {
           t.z -= speed * dt;
           t.mesh.position.z = t.z;
+          const step = now * 0.006 + t.phaseOffset;
+          t.rig.leftLegPivot.rotation.x = Math.sin(step) * 0.42;
+          t.rig.rightLegPivot.rotation.x = -Math.sin(step) * 0.42;
+          t.rig.rightArmPivot.rotation.z = 2.25 + Math.sin(step * 1.4) * 0.35;
+          t.rig.rightForearmPivot.rotation.z = 0.45 + Math.sin(step * 1.4) * 0.25;
           if (!t.resolved && t.z <= 0.12 && t.z >= -0.65) {
             if (t.lane === laneRef.current) {
               t.resolved = true;
@@ -349,11 +372,12 @@ export const DodgeChatGame: React.FC<DodgeChatGameProps> = ({
 
       const targetX = LANE_X[laneRef.current];
       posXRef.current = THREE.MathUtils.damp(posXRef.current, targetX, 16, dt);
-      walkPhaseRef.current += dt * (trappedIdxRef.current !== null ? 1.5 : 10.5);
+      const isTrapped = trappedIdxRef.current !== null;
+      walkPhaseRef.current += dt * (isTrapped ? 1.5 : 10.5);
 
       if (glbRig) {
         glbRig.root.position.x = posXRef.current;
-        glbRig.poseStealthCarry(walkPhaseRef.current, false, false, 0);
+        glbRig.poseSprint(walkPhaseRef.current, false, 0, isTrapped ? 4.8 : 9.0, 0);
       } else {
         runnerRig.root.position.x = posXRef.current;
         runnerRig.leftLegPivot.rotation.x = Math.sin(walkPhaseRef.current) * 0.55;

@@ -320,7 +320,7 @@ export const ShakeMixerGame: React.FC<ShakeMixerGameProps> = ({
       isCancelled: () => unmountedRef.current,
       onLoaded: (rig) => {
         rig.root.position.set(-0.08, 0, -0.15);
-        rig.poseShakeMixer(0, 0);
+        rig.poseShakeMixer(0, 0, 0);
         scene.add(rig.root);
         glbRig = rig;
         mixerRig.root.visible = false;
@@ -341,6 +341,11 @@ export const ShakeMixerGame: React.FC<ShakeMixerGameProps> = ({
 
     let last = performance.now();
     let frameId = 0;
+
+    const tmpPos = new THREE.Vector3();
+    const tmpAxis = new THREE.Vector3();
+    const yAxis = new THREE.Vector3(0, 1, 0);
+    const tiltAxis = new THREE.Vector3(0.25, 0.92, 0.25).normalize();
 
     const tick = (now: number) => {
       if (unmountedRef.current) return;
@@ -363,16 +368,31 @@ export const ShakeMixerGame: React.FC<ShakeMixerGameProps> = ({
       shakeImpulseRef.current = THREE.MathUtils.damp(shakeImpulseRef.current, 0, 8, dt);
       shakePhaseRef.current += dt * (3.2 + shakeImpulseRef.current * 24);
 
-      const bobY = stageRef.current === 'blend' ? Math.sin(shakePhaseRef.current) * (0.04 + shakeImpulseRef.current * 0.14) : 0;
-      shakerGroup.position.set(0.18, stageRef.current === 'blend' ? 1.24 + bobY : 1.11, 0.32);
-      shakerGroup.rotation.z = stageRef.current === 'blend' ? Math.sin(shakePhaseRef.current) * 0.35 : 0;
+      const isBlend = stageRef.current === 'blend';
       const fillCount = lockedRef.current.filter(Boolean).length;
       cupLiquid.scale.y = Math.max(0.25, fillCount / 3);
 
       if (glbRig) {
-        glbRig.poseShakeMixer(shakePhaseRef.current, 0);
+        glbRig.poseShakeMixer(shakePhaseRef.current, 0, isBlend ? 1 : 0);
+        if (isBlend) {
+          glbRig.getGripTransform('right', tmpPos, tmpAxis);
+          shakerGroup.position.copy(tmpPos);
+          shakerGroup.quaternion.setFromUnitVectors(yAxis, tmpAxis.lengthSq() > 0.01 ? tmpAxis : tiltAxis);
+        } else {
+          shakerGroup.position.set(0.22, 1.11, 0.36);
+          shakerGroup.quaternion.identity();
+        }
       } else {
-        mixerRig.rightArmPivot.rotation.x = -1.2 + Math.sin(shakePhaseRef.current) * 0.35;
+        if (isBlend) {
+          mixerRig.rightArmPivot.rotation.x = -1.2 + Math.sin(shakePhaseRef.current) * 0.35;
+          mixerRig.root.updateMatrixWorld(true);
+          mixerRig.rightForearmPivot.localToWorld(shakerGroup.position.set(0, -0.295, 0.02));
+          shakerGroup.rotation.set(0, 0, Math.sin(shakePhaseRef.current) * 0.35);
+        } else {
+          mixerRig.rightArmPivot.rotation.x = -0.35;
+          shakerGroup.position.set(0.22, 1.11, 0.36);
+          shakerGroup.quaternion.identity();
+        }
       }
 
       renderer.render(scene, camera);

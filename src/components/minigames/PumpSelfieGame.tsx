@@ -196,19 +196,27 @@ export const PumpSelfieGame: React.FC<PumpSelfieGameProps> = ({
     const spotGroup = new THREE.Group();
     scene.add(spotGroup);
     const spotRing = new THREE.Mesh(
-      new THREE.RingGeometry(0.45, 0.56, 32),
+      new THREE.RingGeometry(0.42, 0.56, 32),
       new THREE.MeshBasicMaterial({ color: 0xfacc15, side: THREE.DoubleSide })
     );
     spotRing.rotation.x = -Math.PI / 2;
     spotRing.position.y = 0.02;
     spotGroup.add(spotRing);
 
+    const innerGlowRing = new THREE.Mesh(
+      new THREE.CircleGeometry(0.42, 32),
+      new THREE.MeshBasicMaterial({ color: 0xfef08a, transparent: true, opacity: 0.22, side: THREE.DoubleSide, depthWrite: false })
+    );
+    innerGlowRing.rotation.x = -Math.PI / 2;
+    innerGlowRing.position.y = 0.018;
+    spotGroup.add(innerGlowRing);
+
     const lightBeam = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.18, 0.56, 3.2, 24, 1, true),
+      new THREE.CylinderGeometry(0.20, 0.56, 3.2, 24, 1, true),
       new THREE.MeshBasicMaterial({
         color: 0xfde047,
         transparent: true,
-        opacity: 0.14,
+        opacity: 0.22,
         side: THREE.DoubleSide,
         depthWrite: false,
       })
@@ -216,7 +224,26 @@ export const PumpSelfieGame: React.FC<PumpSelfieGameProps> = ({
     lightBeam.position.y = 1.62;
     spotGroup.add(lightBeam);
 
-    // Photobomber crossing in background behind athlete
+    // 3D Smartphone Prop synced to athlete's left hand
+    const phoneGroup = new THREE.Group();
+    const phoneChassis = new THREE.Mesh(
+      new THREE.BoxGeometry(0.088, 0.165, 0.015),
+      new THREE.MeshStandardMaterial({ color: 0x0f172a, roughness: 0.25, metalness: 0.72 })
+    );
+    const phoneScreen = new THREE.Mesh(
+      new THREE.PlaneGeometry(0.075, 0.145),
+      new THREE.MeshBasicMaterial({ color: 0x7dd3fc })
+    );
+    phoneScreen.position.z = 0.0085;
+    const phoneCameraBump = new THREE.Mesh(
+      new THREE.BoxGeometry(0.026, 0.026, 0.006),
+      new THREE.MeshStandardMaterial({ color: 0x334155, metalness: 0.8, roughness: 0.2 })
+    );
+    phoneCameraBump.position.set(0.02, 0.055, -0.009);
+    phoneGroup.add(phoneChassis, phoneScreen, phoneCameraBump);
+    scene.add(phoneGroup);
+
+    // Photobomber crossing in background behind athlete with shoulder towel
     const bomberRig = buildAthleteModel({
       gender: 'male',
       fitnessScore: 34,
@@ -224,6 +251,11 @@ export const PumpSelfieGame: React.FC<PumpSelfieGameProps> = ({
       hairColor: '#52525B',
       outfit: 'basic',
     });
+    const towelMat = new THREE.MeshStandardMaterial({ color: 0xf8fafc, roughness: 0.9 });
+    const shoulderTowel = new THREE.Mesh(new THREE.BoxGeometry(0.11, 0.04, 0.34), towelMat);
+    shoulderTowel.position.set(0.16, 0.56, 0.01);
+    shoulderTowel.rotation.x = 0.12;
+    bomberRig.upperBody.add(shoulderTowel);
     bomberRig.root.position.set(-3.2, 0, -1.05);
     scene.add(bomberRig.root);
 
@@ -269,6 +301,16 @@ export const PumpSelfieGame: React.FC<PumpSelfieGameProps> = ({
     let last = performance.now();
     let frameId = 0;
 
+    const tmpPos = new THREE.Vector3();
+    const tmpAxis = new THREE.Vector3();
+    const tmpFwd = new THREE.Vector3();
+    const tmpPalm = new THREE.Vector3();
+    const phoneBasis = new THREE.Matrix4();
+    const phoneRight = new THREE.Vector3();
+    const phoneUp = new THREE.Vector3();
+    const phoneNormal = new THREE.Vector3();
+    const worldUp = new THREE.Vector3(0, 1, 0);
+
     const tick = (now: number) => {
       if (unmountedRef.current) return;
       const dt = Math.min(0.05, (now - last) / 1000);
@@ -298,6 +340,10 @@ export const PumpSelfieGame: React.FC<PumpSelfieGameProps> = ({
         const wStep = bomberXRef.current * 4;
         bomberRig.leftLegPivot.rotation.x = Math.sin(wStep) * 0.45;
         bomberRig.rightLegPivot.rotation.x = -Math.sin(wStep) * 0.45;
+        bomberRig.leftArmPivot.rotation.x = -Math.sin(wStep) * 0.35;
+        bomberRig.rightArmPivot.rotation.x = Math.sin(wStep) * 0.25;
+        bomberRig.leftForearmPivot.rotation.x = -0.35;
+        bomberRig.rightForearmPivot.rotation.x = -0.55;
         if (bomberXRef.current > 3.2) {
           bomberXRef.current = -3.2;
           bomberWaitRef.current = Math.max(0.45, 1.3 - difficulty * 0.15);
@@ -313,8 +359,26 @@ export const PumpSelfieGame: React.FC<PumpSelfieGameProps> = ({
       if (glbRig) {
         glbRig.root.position.x = playerXRef.current;
         glbRig.poseSelfieFlex(0.45 + selfiePosePulseRef.current * 0.55, true, 0);
+        glbRig.getGripTransform('left', tmpPos, tmpAxis, tmpFwd, tmpPalm);
+        phoneGroup.position.copy(tmpPos).addScaledVector(tmpFwd, 0.03);
+        // Orient screen toward athlete's face (negative Z / inward toward chest)
+        phoneNormal.copy(tmpPalm).normalize();
+        if (phoneNormal.z > 0.2) phoneNormal.negate();
+        phoneUp.copy(worldUp);
+        phoneRight.crossVectors(phoneUp, phoneNormal).normalize();
+        if (phoneRight.lengthSq() < 0.01) phoneRight.set(1, 0, 0);
+        phoneUp.crossVectors(phoneNormal, phoneRight).normalize();
+        phoneBasis.makeBasis(phoneRight, phoneUp, phoneNormal);
+        phoneGroup.quaternion.setFromRotationMatrix(phoneBasis);
       } else {
         modelRig.root.position.x = playerXRef.current;
+        modelRig.leftArmPivot.rotation.x = -0.85;
+        modelRig.leftForearmPivot.rotation.x = -0.95;
+        modelRig.rightArmPivot.rotation.z = 1.2;
+        modelRig.rightForearmPivot.rotation.z = 1.5;
+        modelRig.root.updateMatrixWorld(true);
+        modelRig.leftForearmPivot.localToWorld(phoneGroup.position.set(0, -0.295, 0.02));
+        phoneGroup.rotation.set(-0.25, Math.PI, 0);
       }
 
       renderer.render(scene, camera);

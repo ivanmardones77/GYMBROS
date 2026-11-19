@@ -233,6 +233,8 @@ export class GlbPoseRig {
   private readonly morphMeshes: THREE.Mesh[] = [];
   private readonly handCal: Record<'left' | 'right', HandCalibration>;
   private readonly restFootY: number;
+  private readonly restFootSlopeY: number;
+  private readonly restFootSlopeZ: number;
 
   // Pre-allocated math temporaries (strictly 0 allocations inside tick)
   private readonly tmpContainerQ = new THREE.Quaternion();
@@ -337,12 +339,30 @@ export class GlbPoseRig {
 
     const lf = this.bones.leftFoot;
     const rf = this.bones.rightFoot;
+    const lt = this.bones.leftToeBase;
     if (lf && rf) {
       lf.getWorldPosition(this.tmpLeftFootPos);
       rf.getWorldPosition(this.tmpRightFootPos);
       this.restFootY = Math.min(this.tmpLeftFootPos.y, this.tmpRightFootPos.y);
     } else {
       this.restFootY = 0.14;
+    }
+
+    if (lf && lt) {
+      lf.getWorldPosition(this.tmpBonePos);
+      lt.getWorldPosition(this.tmpChildPos);
+      this.tmpCurDir.copy(this.tmpChildPos).sub(this.tmpBonePos);
+      if (this.tmpCurDir.lengthSq() > 1e-6) {
+        this.tmpCurDir.normalize();
+        this.restFootSlopeY = this.tmpCurDir.y;
+        this.restFootSlopeZ = Math.max(0.25, this.tmpCurDir.z);
+      } else {
+        this.restFootSlopeY = -0.54;
+        this.restFootSlopeZ = 0.84;
+      }
+    } else {
+      this.restFootSlopeY = -0.54;
+      this.restFootSlopeZ = 0.84;
     }
   }
 
@@ -565,6 +585,26 @@ export class GlbPoseRig {
   }
 
   /**
+   * Exposes the gripped fist center (`posOut`), grip cylinder axis (`axisOut`), finger forward (`forwardOut`),
+   * and palm normal (`palmOut`) in world space so external props (dumbbells, phone, shaker, handle) lock onto hands.
+   */
+  getGripTransform(
+    side: 'left' | 'right',
+    posOut: THREE.Vector3,
+    axisOut?: THREE.Vector3,
+    forwardOut?: THREE.Vector3,
+    palmOut?: THREE.Vector3
+  ): void {
+    this.root.updateMatrixWorld(true);
+    this.computeActualGripWorld(side, posOut);
+    if (axisOut) {
+      axisOut.crossVectors(this.ikWorldF, this.ikWorldP).normalize();
+    }
+    if (forwardOut) forwardOut.copy(this.ikWorldF);
+    if (palmOut) palmOut.copy(this.ikWorldP);
+  }
+
+  /**
    * Drives a natural, athletic standing Idle posture (breathing chest, relaxed bent arms,
    * soft half-closed hands, subtle head poise) and blends cleanly into Double-Biceps Flex
    * or Tired recovery without shoulder torsion.
@@ -773,8 +813,8 @@ export class GlbPoseRig {
     this.aimCharDir(b.rightUpLeg, b.rightLeg, -0.22, thighY, thighZ);
     this.aimCharDir(b.leftLeg, b.leftFoot, 0.04, -0.94, shinZ);
     this.aimCharDir(b.rightLeg, b.rightFoot, -0.04, -0.94, shinZ);
-    this.aimCharDir(b.leftFoot, b.leftToeBase, 0.14, -0.20, 0.97);
-    this.aimCharDir(b.rightFoot, b.rightToeBase, -0.14, -0.20, 0.97);
+    this.aimCharDir(b.leftFoot, b.leftToeBase, 0.12, this.restFootSlopeY, this.restFootSlopeZ);
+    this.aimCharDir(b.rightFoot, b.rightToeBase, -0.12, this.restFootSlopeY, this.restFootSlopeZ);
 
     this.alignStandingFloor(baseFloorY);
     this.root.updateMatrixWorld(true);
@@ -896,8 +936,8 @@ export class GlbPoseRig {
     this.aimCharDir(b.rightUpLeg, b.rightLeg, -0.18, -0.78, 0.60);
     this.aimCharDir(b.leftLeg, b.leftFoot, 0.05, -0.97, -0.20);
     this.aimCharDir(b.rightLeg, b.rightFoot, -0.05, -0.97, -0.20);
-    this.aimCharDir(b.leftFoot, b.leftToeBase, 0.12, -0.22, 0.96);
-    this.aimCharDir(b.rightFoot, b.rightToeBase, -0.12, -0.22, 0.96);
+    this.aimCharDir(b.leftFoot, b.leftToeBase, 0.10, this.restFootSlopeY, this.restFootSlopeZ);
+    this.aimCharDir(b.rightFoot, b.rightToeBase, -0.10, this.restFootSlopeY, this.restFootSlopeZ);
 
     // Vigorous alternating shoulder + forearm rope slam
     this.aimCharDir(b.leftArm, b.leftForeArm, 0.22, -0.72 + leftWave * 0.45, 0.64);
@@ -955,27 +995,31 @@ export class GlbPoseRig {
     this.resetToBindPose();
     this.setGrip(1.0);
 
-    const hinge = THREE.MathUtils.lerp(1.02, 0.04, liftT);
-    this.aimCharDir(b.spine01, b.spine, 0, Math.cos(hinge), Math.sin(hinge));
+    // Hinge across BOTH lumbar (spine02->spine01) and thoracic (spine01->spine) so shoulders drop right over the barbell
+    const lumbar = THREE.MathUtils.lerp(0.76, 0.03, liftT);
+    const thoracic = THREE.MathUtils.lerp(1.18, 0.05, liftT);
+    this.aimCharDir(b.spine02, b.spine01, 0, Math.cos(lumbar), Math.sin(lumbar));
+    this.aimCharDir(b.spine01, b.spine, 0, Math.cos(thoracic), Math.sin(thoracic));
     if (b.neck && b.head) {
-      this.aimCharDir(b.neck, b.head, 0, Math.cos(hinge * 0.45), Math.sin(hinge * 0.45));
+      const neckAng = THREE.MathUtils.lerp(0.52, 0.02, liftT);
+      this.aimCharDir(b.neck, b.head, 0, Math.cos(neckAng), Math.sin(neckAng));
     }
 
-    const thighY = THREE.MathUtils.lerp(-0.56, -0.99, liftT);
-    const thighZ = THREE.MathUtils.lerp(0.80, 0.05, liftT);
-    const shinZ = THREE.MathUtils.lerp(-0.22, -0.03, liftT);
+    const thighY = THREE.MathUtils.lerp(-0.34, -0.985, liftT);
+    const thighZ = THREE.MathUtils.lerp(0.88, 0.05, liftT);
+    const shinZ = THREE.MathUtils.lerp(-0.26, -0.03, liftT);
     this.aimCharDir(b.leftUpLeg, b.leftLeg, 0.16, thighY, thighZ);
     this.aimCharDir(b.rightUpLeg, b.rightLeg, -0.16, thighY, thighZ);
     this.aimCharDir(b.leftLeg, b.leftFoot, 0.04, -0.96, shinZ);
     this.aimCharDir(b.rightLeg, b.rightFoot, -0.04, -0.96, shinZ);
-    this.aimCharDir(b.leftFoot, b.leftToeBase, 0.12, -0.20, 0.97);
-    this.aimCharDir(b.rightFoot, b.rightToeBase, -0.12, -0.20, 0.97);
+    this.aimCharDir(b.leftFoot, b.leftToeBase, 0.10, this.restFootSlopeY, this.restFootSlopeZ);
+    this.aimCharDir(b.rightFoot, b.rightToeBase, -0.10, this.restFootSlopeY, this.restFootSlopeZ);
 
     this.alignStandingFloor(baseFloorY);
     this.root.updateMatrixWorld(true);
 
-    const barY = baseFloorY + THREE.MathUtils.lerp(0.45, 0.88, liftT);
-    const barZ = THREE.MathUtils.lerp(0.28, 0.21, liftT);
+    const targetBarY = baseFloorY + THREE.MathUtils.lerp(0.37, 0.80, liftT);
+    const targetBarZ = THREE.MathUtils.lerp(0.24, 0.20, liftT);
     const gripX = Math.max(0.32, this.handCal.left.uGrip * 4.2);
 
     this.ikBenchF.set(0, -0.92, -0.38).normalize();
@@ -984,18 +1028,23 @@ export class GlbPoseRig {
     for (const side of ['left', 'right'] as const) {
       const sgn = side === 'left' ? 1 : -1;
       const cal = this.handCal[side];
-      const handY = barY + Math.sin(tiltRad) * sgn * gripX;
+      const handY = targetBarY + Math.sin(tiltRad) * sgn * gripX;
       this.ikGripVec
-        .set(sgn * gripX, handY, barZ)
+        .set(sgn * gripX, handY, targetBarZ)
         .addScaledVector(this.ikBenchF, -cal.uGrip)
         .addScaledVector(this.ikBenchP, -cal.pGrip);
-      this.ikPoleVec.set(sgn * 0.45, 0.12, -0.82);
+      this.ikPoleVec.set(sgn * 0.48, 0.16, -0.82);
       this.solveArmToWristWorld(side, this.ikGripVec, this.ikPoleVec);
       this.orientHandWorld(side, this.ikBenchF, this.ikBenchP);
     }
 
     this.root.updateMatrixWorld(true);
-    return { barY, barZ };
+    this.computeActualGripWorld('left', this.ikTmpVecL);
+    this.computeActualGripWorld('right', this.ikTmpVecR);
+    return {
+      barY: (this.ikTmpVecL.y + this.ikTmpVecR.y) * 0.5,
+      barZ: (this.ikTmpVecL.z + this.ikTmpVecR.z) * 0.5,
+    };
   }
 
   /** Pull-up / Muscle-up bar hang (`pullT` 0 = active hang .. 1 = chin over bar .. 1.35 = muscle-up). */
@@ -1017,14 +1066,14 @@ export class GlbPoseRig {
     this.root.updateMatrixWorld(true);
     if (b.leftArm) {
       b.leftArm.getWorldPosition(this.tmpBonePos);
-      // Active scapular hang keeps slight elbow bend & clean shoulder clearance
+      // Full dead-hang to chin-over-bar & muscle-up dip lockout
       const targetShoulderY =
-        barY - THREE.MathUtils.lerp(0.24, 0.08, Math.min(1, pullT)) + Math.max(0, pullT - 1) * 0.30;
+        barY - THREE.MathUtils.lerp(0.45, 0.06, Math.min(1, pullT)) + Math.max(0, pullT - 1) * 0.34;
       this.root.position.y += targetShoulderY - this.tmpBonePos.y;
     }
     this.root.updateMatrixWorld(true);
 
-    const gripX = Math.max(0.54, this.handCal.left.uGrip * 6.2);
+    const gripX = Math.max(0.44, this.handCal.left.uGrip * 5.2);
     if (pullT <= 1.0) {
       this.ikBenchF.set(0, 0.55, -0.83).normalize();
       this.ikBenchP.set(0, -0.83, 0.55).normalize();
@@ -1048,32 +1097,49 @@ export class GlbPoseRig {
   }
 
   /** Strongman Tire Flip (`stageT` 0 = low catch under tire .. 1 = chest explosive drive). */
-  poseTireFlip(stageT: number, baseFloorY = 0): void {
+  poseTireFlip(stageT: number, baseFloorY = 0, tireAngle = 0): void {
     const b = this.bones;
     this.resetToBindPose();
     this.setGrip(1.0);
 
-    const lean = THREE.MathUtils.lerp(0.84, 0.32, stageT);
-    this.aimCharDir(b.spine01, b.spine, 0, Math.cos(lean), Math.sin(lean));
+    const lumbar = THREE.MathUtils.lerp(0.65, 0.16, stageT);
+    const thoracic = THREE.MathUtils.lerp(0.95, 0.28, stageT);
+    this.aimCharDir(b.spine02, b.spine01, 0, Math.cos(lumbar), Math.sin(lumbar));
+    this.aimCharDir(b.spine01, b.spine, 0, Math.cos(thoracic), Math.sin(thoracic));
 
-    const thighY = THREE.MathUtils.lerp(-0.46, -0.88, stageT);
-    const thighZ = THREE.MathUtils.lerp(0.80, 0.44, stageT);
+    const thighY = THREE.MathUtils.lerp(-0.34, -0.86, stageT);
+    const thighZ = THREE.MathUtils.lerp(0.86, 0.44, stageT);
     const shinZ = THREE.MathUtils.lerp(-0.28, -0.18, stageT);
     this.aimCharDir(b.leftUpLeg, b.leftLeg, 0.22, thighY, thighZ);
     this.aimCharDir(b.rightUpLeg, b.rightLeg, -0.22, thighY, thighZ);
     this.aimCharDir(b.leftLeg, b.leftFoot, 0.04, -0.94, shinZ);
     this.aimCharDir(b.rightLeg, b.rightFoot, -0.04, -0.94, shinZ);
-    this.aimCharDir(b.leftFoot, b.leftToeBase, 0.12, -0.22, 0.96);
-    this.aimCharDir(b.rightFoot, b.rightToeBase, -0.12, -0.22, 0.96);
-
-    const armY = THREE.MathUtils.lerp(-0.82, -0.34, stageT);
-    const armZ = THREE.MathUtils.lerp(0.44, 0.54, stageT);
-    this.aimCharDir(b.leftArm, b.leftForeArm, 0.42, armY, armZ);
-    this.aimCharDir(b.rightArm, b.rightForeArm, -0.42, armY, armZ);
-    this.aimCharDir(b.leftForeArm, b.leftHand, -0.10, THREE.MathUtils.lerp(-0.15, 0.72, stageT), 0.76);
-    this.aimCharDir(b.rightForeArm, b.rightHand, 0.10, THREE.MathUtils.lerp(-0.15, 0.72, stageT), 0.76);
+    this.aimCharDir(b.leftFoot, b.leftToeBase, 0.10, this.restFootSlopeY, this.restFootSlopeZ);
+    this.aimCharDir(b.rightFoot, b.rightToeBase, -0.10, this.restFootSlopeY, this.restFootSlopeZ);
 
     this.alignStandingFloor(baseFloorY);
+    this.root.updateMatrixWorld(true);
+
+    // Tire rim tread location in world space (tirePivot at (0, 0.03, 0.98), lip at local (0, 0.10, -1.06))
+    const lipY = 0.03 + 0.10 * Math.cos(tireAngle) + 1.06 * Math.sin(tireAngle);
+    const lipZ = 0.98 + 0.10 * Math.sin(tireAngle) - 1.06 * Math.cos(tireAngle);
+
+    // Palms scoop UP under tire at catch -> press forward against tread at drive
+    this.ikBenchF.set(0, THREE.MathUtils.lerp(0.15, 0.85, stageT), THREE.MathUtils.lerp(0.98, 0.52, stageT)).normalize();
+    this.ikBenchP.set(0, THREE.MathUtils.lerp(0.98, -0.45, stageT), THREE.MathUtils.lerp(-0.15, 0.88, stageT)).normalize();
+
+    for (const side of ['left', 'right'] as const) {
+      const sgn = side === 'left' ? 1 : -1;
+      const cal = this.handCal[side];
+      this.ikGripVec
+        .set(sgn * 0.29, lipY, lipZ)
+        .addScaledVector(this.ikBenchF, -cal.uGrip)
+        .addScaledVector(this.ikBenchP, -cal.pGrip);
+      this.ikPoleVec.set(sgn * 0.55, -0.35, -0.65);
+      this.solveArmToWristWorld(side, this.ikGripVec, this.ikPoleVec);
+      this.orientHandWorld(side, this.ikBenchF, this.ikBenchP);
+    }
+    this.root.updateMatrixWorld(true);
   }
 
   /** Fast footwork drill on agility ladder (`stridePhase` in radians). */
@@ -1157,37 +1223,58 @@ export class GlbPoseRig {
     this.alignStandingFloor(baseFloorY + throwT * 0.06);
   }
 
-  /** Seated Rowing Ergometer stroke (`strokeT` 0 = forward catch .. 1 = finish pull). */
-  poseRowing(strokeT: number, seatY = 0.42): void {
+  /** Seated Rowing Ergometer stroke (`strokeT` 0 = forward catch .. 1 = finish pull) with 2-bone handle IK. */
+  poseRowing(strokeT: number, seatY = 0.42): { handleY: number; handleZ: number } {
     const b = this.bones;
     this.resetToBindPose();
     this.setGrip(1.0);
 
-    const lean = THREE.MathUtils.lerp(0.38, -0.30, strokeT);
+    const lean = THREE.MathUtils.lerp(0.42, -0.28, strokeT);
     this.aimCharDir(b.spine01, b.spine, 0, Math.cos(lean), Math.sin(lean));
 
     // Seated thighs forward, knees bend high at catch (strokeT=0) and extend forward at finish (strokeT=1)
-    const thighY = THREE.MathUtils.lerp(0.06, -0.08, strokeT);
+    const thighY = THREE.MathUtils.lerp(0.08, -0.08, strokeT);
     const thighZ = THREE.MathUtils.lerp(0.95, 0.98, strokeT);
-    const shinY = THREE.MathUtils.lerp(-0.98, -0.45, strokeT);
-    const shinZ = THREE.MathUtils.lerp(0.08, 0.88, strokeT);
+    const shinY = THREE.MathUtils.lerp(-0.98, -0.46, strokeT);
+    const shinZ = THREE.MathUtils.lerp(0.08, 0.86, strokeT);
     this.aimCharDir(b.leftUpLeg, b.leftLeg, 0.16, thighY, thighZ);
     this.aimCharDir(b.rightUpLeg, b.rightLeg, -0.16, thighY, thighZ);
     this.aimCharDir(b.leftLeg, b.leftFoot, 0.04, shinY, shinZ);
     this.aimCharDir(b.rightLeg, b.rightFoot, -0.04, shinY, shinZ);
 
-    // Arms reach smoothly at catch -> elbows sweep past ribs at finish
-    const armFwd = THREE.MathUtils.lerp(0.42, -0.38, strokeT);
-    const armDown = THREE.MathUtils.lerp(-0.66, -0.64, strokeT);
-    this.aimCharDir(b.leftArm, b.leftForeArm, 0.46, armDown, armFwd);
-    this.aimCharDir(b.rightArm, b.rightForeArm, -0.46, armDown, armFwd);
-    this.aimCharDir(b.leftForeArm, b.leftHand, -0.12, THREE.MathUtils.lerp(-0.1, 0.25, strokeT), 0.96);
-    this.aimCharDir(b.rightForeArm, b.rightHand, 0.12, THREE.MathUtils.lerp(-0.1, 0.25, strokeT), 0.96);
-
+    this.root.updateMatrixWorld(true);
     if (b.hips) {
-      this.root.position.y = seatY - 0.82;
+      b.hips.getWorldPosition(this.tmpBonePos);
+      this.root.position.y += (seatY + 0.06) - this.tmpBonePos.y;
     }
     this.root.updateMatrixWorld(true);
+
+    const targetHandleY = seatY + THREE.MathUtils.lerp(0.32, 0.40, strokeT);
+    const targetHandleZ = this.root.position.z + THREE.MathUtils.lerp(0.46, 0.14, strokeT);
+    const gripX = 0.18;
+
+    this.ikBenchF.set(0, -0.82, -0.57).normalize();
+    this.ikBenchP.set(0, -0.57, 0.82).normalize();
+
+    for (const side of ['left', 'right'] as const) {
+      const sgn = side === 'left' ? 1 : -1;
+      const cal = this.handCal[side];
+      this.ikGripVec
+        .set(sgn * gripX, targetHandleY, targetHandleZ)
+        .addScaledVector(this.ikBenchF, -cal.uGrip)
+        .addScaledVector(this.ikBenchP, -cal.pGrip);
+      this.ikPoleVec.set(sgn * 0.55, -0.35, -0.72);
+      this.solveArmToWristWorld(side, this.ikGripVec, this.ikPoleVec);
+      this.orientHandWorld(side, this.ikBenchF, this.ikBenchP);
+    }
+
+    this.root.updateMatrixWorld(true);
+    this.computeActualGripWorld('left', this.ikTmpVecL);
+    this.computeActualGripWorld('right', this.ikTmpVecR);
+    return {
+      handleY: (this.ikTmpVecL.y + this.ikTmpVecR.y) * 0.5,
+      handleZ: (this.ikTmpVecL.z + this.ikTmpVecR.z) * 0.5,
+    };
   }
 
   /** Forearm Isometric Plank (`wobbleX` -1..1, `trembleY` small offset). */
@@ -1205,30 +1292,40 @@ export class GlbPoseRig {
     this.aimCharDir(b.rightFoot, b.rightToeBase, -0.04, -0.92, -0.35);
 
     // Forearms planted under chest supporting body
-    this.aimCharDir(b.leftArm, b.leftForeArm, 0.18, -0.32, 0.92);
-    this.aimCharDir(b.rightArm, b.rightForeArm, -0.18, -0.32, 0.92);
-    this.aimCharDir(b.leftForeArm, b.leftHand, -0.22, 0.92, 0.24);
-    this.aimCharDir(b.rightForeArm, b.rightHand, 0.22, 0.92, 0.24);
+    this.aimCharDir(b.leftArm, b.leftForeArm, 0.14, -0.24, 0.96);
+    this.aimCharDir(b.rightArm, b.rightForeArm, -0.14, -0.24, 0.96);
+    this.aimCharDir(b.leftForeArm, b.leftHand, -0.20, 0.94, 0.22);
+    this.aimCharDir(b.rightForeArm, b.rightHand, 0.20, 0.94, 0.22);
 
-    // Tilt athlete prone over mat, keeping lowest toe/forearm resting near floorY
+    // Level body prone so BOTH toes and forearms rest cleanly ON the exercise mat
     this.root.rotation.x = Math.PI * 0.47;
     this.root.rotation.z = wobbleX * 0.07;
     this.root.updateMatrixWorld(true);
-    if (b.leftToeBase) {
+    if (b.leftToeBase && b.leftForeArm) {
       b.leftToeBase.getWorldPosition(this.tmpLeftFootPos);
-      this.root.position.y += (floorY + 0.04 + trembleY * 0.015) - this.tmpLeftFootPos.y;
+      b.leftForeArm.getWorldPosition(this.tmpBonePos);
+      const dz = Math.max(0.4, this.tmpBonePos.z - this.tmpLeftFootPos.z);
+      const dy = (this.tmpBonePos.y - 0.015) - this.tmpLeftFootPos.y;
+      this.root.rotation.x += Math.atan2(dy, dz);
+      this.root.updateMatrixWorld(true);
+      b.leftToeBase.getWorldPosition(this.tmpLeftFootPos);
+      b.leftForeArm.getWorldPosition(this.tmpBonePos);
+      const minY = Math.min(this.tmpLeftFootPos.y, this.tmpBonePos.y - 0.02);
+      this.root.position.y += (floorY + 0.035 + trembleY * 0.012) - minY;
     }
     this.root.updateMatrixWorld(true);
   }
 
-  /** Heavy Prowler Sled Push (`stridePhase` in radians). */
-  poseSledPush(stridePhase: number, baseFloorY = 0): void {
+  /** Heavy Prowler Sled Push (`stridePhase` in radians) gripping upright handles cleanly. */
+  poseSledPush(stridePhase: number, baseFloorY = 0, handleY = 0.88, handleZ = 0.50): void {
     const b = this.bones;
     this.resetToBindPose();
     this.setGrip(1.0);
 
     // Deep 36-deg forward drive torso angle
-    this.aimCharDir(b.spine01, b.spine, Math.sin(stridePhase) * 0.05, 0.80, 0.58);
+    const sway = Math.sin(stridePhase) * 0.05;
+    this.aimCharDir(b.spine02, b.spine01, sway * 0.5, 0.88, 0.46);
+    this.aimCharDir(b.spine01, b.spine, sway, 0.80, 0.58);
 
     const pL = stridePhase;
     const pR = stridePhase + Math.PI;
@@ -1242,31 +1339,48 @@ export class GlbPoseRig {
     this.aimCharDir(b.leftLeg, b.leftFoot, 0.04, -Math.cos(thL - kbL), Math.sin(thL - kbL));
     this.aimCharDir(b.rightLeg, b.rightFoot, -0.04, -Math.cos(thR - kbR), Math.sin(thR - kbR));
 
-    // Wide braced upper arms + forward forearms pushing upright sled handles
-    this.aimCharDir(b.leftArm, b.leftForeArm, 0.48, -0.52, 0.48);
-    this.aimCharDir(b.rightArm, b.rightForeArm, -0.48, -0.52, 0.48);
-    this.aimCharDir(b.leftForeArm, b.leftHand, -0.06, 0.32, 0.94);
-    this.aimCharDir(b.rightForeArm, b.rightHand, 0.06, 0.32, 0.94);
-
     this.alignStandingFloor(baseFloorY);
+    this.root.updateMatrixWorld(true);
+
+    // Lock hands directly onto the two orange vertical push poles at (x = ±0.32)
+    for (const side of ['left', 'right'] as const) {
+      const sgn = side === 'left' ? 1 : -1;
+      const cal = this.handCal[side];
+      this.ikBenchF.set(-sgn * 0.42, 0.08, 0.90).normalize();
+      this.ikBenchP.set(-sgn * 0.92, 0.10, -0.38).normalize();
+      this.ikGripVec
+        .set(sgn * 0.32, handleY, handleZ)
+        .addScaledVector(this.ikBenchF, -cal.uGrip)
+        .addScaledVector(this.ikBenchP, -cal.pGrip);
+      this.ikPoleVec.set(sgn * 0.65, -0.55, -0.35);
+      this.solveArmToWristWorld(side, this.ikGripVec, this.ikPoleVec);
+      this.orientHandWorld(side, this.ikBenchF, this.ikBenchP);
+    }
+    this.root.updateMatrixWorld(true);
   }
 
-  /** Supplement Bar Shaker Mix (`shakePhase` in radians). */
-  poseShakeMixer(shakePhase: number, baseFloorY = 0): void {
+  /** Supplement Bar Shaker Mix (`shakePhase` in radians, `shakeAmp` 0 = resting at bar .. 1 = shaking). */
+  poseShakeMixer(shakePhase: number, baseFloorY = 0, shakeAmp = 1): void {
     const b = this.bones;
     this.resetToBindPose();
-    this.setGrip(1.0);
+    this.setGrip(shakeAmp > 0.2 ? 1.0 : 0.45);
 
-    const bob = Math.sin(shakePhase) * 0.25;
-    this.aimCharDir(b.spine01, b.spine, Math.sin(shakePhase * 0.5) * 0.05, 0.98, 0.06);
+    const bob = Math.sin(shakePhase) * 0.28 * shakeAmp;
+    this.aimCharDir(b.spine01, b.spine, Math.sin(shakePhase * 0.5) * 0.05 * shakeAmp, 0.98, 0.06);
     this.aimCharDir(b.leftUpLeg, b.leftLeg, 0.08, -0.995, 0.02);
     this.aimCharDir(b.rightUpLeg, b.rightLeg, -0.08, -0.995, 0.02);
     this.aimCharDir(b.leftLeg, b.leftFoot, 0.03, -0.995, -0.04);
     this.aimCharDir(b.rightLeg, b.rightFoot, -0.03, -0.995, -0.04);
 
-    // Right arm vigorously shaking cup chest-high, left braced smoothly
-    this.aimCharDir(b.rightArm, b.rightForeArm, -0.28, -0.58 + bob * 0.35, 0.68);
-    this.aimCharDir(b.rightForeArm, b.rightHand, 0.18, 0.65 + bob * 0.85, 0.62);
+    if (shakeAmp > 0.2) {
+      // Right arm vigorously shaking cup chest-high, left braced
+      this.aimCharDir(b.rightArm, b.rightForeArm, -0.28, -0.54 + bob * 0.35, 0.68);
+      this.aimCharDir(b.rightForeArm, b.rightHand, 0.18, 0.68 + bob * 0.9, 0.62);
+    } else {
+      // Dosing posture: hands calmly near counter height
+      this.aimCharDir(b.rightArm, b.rightForeArm, -0.26, -0.82, 0.42);
+      this.aimCharDir(b.rightForeArm, b.rightHand, 0.14, -0.05, 0.96);
+    }
     this.aimCharDir(b.leftArm, b.leftForeArm, 0.28, -0.88, 0.25);
     this.aimCharDir(b.leftForeArm, b.leftHand, -0.15, -0.22, 0.92);
 
@@ -1301,7 +1415,7 @@ export class GlbPoseRig {
     this.alignStandingFloor(baseFloorY);
   }
 
-  /** Standing Dumbbell Curl with gaze deflection (`curlT` 0..1, `headYaw` -1..1). */
+  /** Standing Dumbbell Curl with true left/right head Y-yaw (`curlT` 0..1, `headYaw` -1..1). */
   poseTunnelCurl(curlT: number, headYaw: number, baseFloorY = 0): void {
     const b = this.bones;
     this.resetToBindPose();
@@ -1309,7 +1423,9 @@ export class GlbPoseRig {
 
     this.aimCharDir(b.spine01, b.spine, 0, 0.99, 0.04);
     if (b.neck && b.head) {
-      this.aimCharDir(b.neck, b.head, headYaw * 0.65, 0.96, -0.12);
+      this.aimCharDir(b.neck, b.head, 0, 0.98, -0.06);
+      this.rotateCharAxis(b.neck, 0, 1, 0, headYaw * 0.34);
+      this.rotateCharAxis(b.head, 0, 1, 0, headYaw * 0.78);
     }
 
     this.aimCharDir(b.leftUpLeg, b.leftLeg, 0.1, -0.99, 0.06);
@@ -1317,12 +1433,15 @@ export class GlbPoseRig {
     this.aimCharDir(b.leftLeg, b.leftFoot, 0.03, -0.99, -0.05);
     this.aimCharDir(b.rightLeg, b.rightFoot, -0.03, -0.99, -0.05);
 
-    this.aimCharDir(b.leftArm, b.leftForeArm, 0.40, -0.90, 0.14);
-    this.aimCharDir(b.rightArm, b.rightForeArm, -0.40, -0.90, 0.14);
+    this.aimCharDir(b.leftArm, b.leftForeArm, 0.38, -0.90, 0.14);
+    this.aimCharDir(b.rightArm, b.rightForeArm, -0.38, -0.90, 0.14);
     const faY = THREE.MathUtils.lerp(-0.55, 0.88, curlT);
     const faZ = THREE.MathUtils.lerp(0.82, 0.42, curlT);
     this.aimCharDir(b.leftForeArm, b.leftHand, -0.08, faY, faZ);
     this.aimCharDir(b.rightForeArm, b.rightHand, 0.08, faY, faZ);
+    // Keep wrists aligned so horizontal dumbbell handles track naturally
+    this.rotateCharAxis(b.leftHand, 0, 0, 1, 0.25);
+    this.rotateCharAxis(b.rightHand, 0, 0, 1, -0.25);
 
     this.alignStandingFloor(baseFloorY);
   }
@@ -1331,28 +1450,31 @@ export class GlbPoseRig {
   poseMirrorFlex(flexT: number, disguise: boolean, baseFloorY = 0): void {
     const b = this.bones;
     this.resetToBindPose();
-    this.setGrip(disguise ? 0.15 : 1.0);
+    this.setGrip(disguise ? 0.2 : 1.0);
 
     if (disguise) {
-      this.aimCharDir(b.spine01, b.spine, 0.12, 0.98, 0.02);
+      this.aimCharDir(b.spine01, b.spine, 0.08, 0.98, 0.02);
       if (b.neck && b.head) {
-        this.aimCharDir(b.neck, b.head, 0.35, 0.92, 0.18);
+        this.aimCharDir(b.neck, b.head, 0.22, 0.95, 0.12);
+        this.rotateCharAxis(b.head, 0, 1, 0, -0.28);
       }
       this.aimCharDir(b.leftUpLeg, b.leftLeg, 0.08, -0.995, 0.02);
       this.aimCharDir(b.rightUpLeg, b.rightLeg, -0.08, -0.995, 0.02);
-      this.aimCharDir(b.leftArm, b.leftForeArm, 0.36, -0.92, 0.08);
+      this.aimCharDir(b.leftArm, b.leftForeArm, 0.32, -0.94, 0.08);
       this.aimCharDir(b.rightArm, b.rightForeArm, -0.44, -0.78, 0.25);
-      this.aimCharDir(b.leftForeArm, b.leftHand, -0.05, -0.82, 0.45);
-      this.aimCharDir(b.rightForeArm, b.rightHand, 0.28, 0.78, 0.35);
+      this.aimCharDir(b.leftForeArm, b.leftHand, -0.05, -0.86, 0.38);
+      this.aimCharDir(b.rightForeArm, b.rightHand, 0.32, 0.78, 0.32);
     } else {
       const puff = 0.08 + flexT * 0.10;
       this.aimCharDir(b.spine01, b.spine, 0, 0.99, -puff);
-      this.aimCharDir(b.leftUpLeg, b.leftLeg, 0.16, -0.98, 0.08);
-      this.aimCharDir(b.rightUpLeg, b.rightLeg, -0.16, -0.98, 0.08);
-      this.aimCharDir(b.leftArm, b.leftForeArm, 0.94, 0.08 + flexT * 0.16, 0.18);
-      this.aimCharDir(b.rightArm, b.rightForeArm, -0.94, 0.08 + flexT * 0.16, 0.18);
-      this.aimCharDir(b.leftForeArm, b.leftHand, -0.45, 0.88, 0.18);
-      this.aimCharDir(b.rightForeArm, b.rightHand, 0.45, 0.88, 0.18);
+      this.aimCharDir(b.leftUpLeg, b.leftLeg, 0.14, -0.98, 0.06);
+      this.aimCharDir(b.rightUpLeg, b.rightLeg, -0.14, -0.98, 0.06);
+      this.aimCharDir(b.leftArm, b.leftForeArm, 0.94, 0.14 + flexT * 0.16, 0.16);
+      this.aimCharDir(b.rightArm, b.rightForeArm, -0.94, 0.14 + flexT * 0.16, 0.16);
+      this.aimCharDir(b.leftForeArm, b.leftHand, -0.54, 0.82, 0.22);
+      this.aimCharDir(b.rightForeArm, b.rightHand, 0.54, 0.82, 0.22);
+      this.rotateCharAxis(b.leftHand, 0, 0, 1, 0.36);
+      this.rotateCharAxis(b.rightHand, 0, 0, 1, -0.36);
     }
 
     this.alignStandingFloor(baseFloorY);

@@ -157,11 +157,14 @@ export const MirrorPosingGame: React.FC<MirrorPosingGameProps> = ({
     const h = Math.max(1, container.clientHeight);
     const aspect = w / h;
     const camera = new THREE.PerspectiveCamera(42, aspect, 0.1, 40);
-    camera.position.set(1.55, 1.48, computeResponsiveCameraZ(3.15, aspect, 1.0));
-    camera.lookAt(0, 1.08, 0.25);
+    camera.position.set(0.28, 1.38, computeResponsiveCameraZ(3.05, aspect, 1.0));
+    camera.lookAt(0, 1.05, -0.25);
 
     createThreePointLights(scene, 6);
-    addGymDecor(scene, ['dumbbells', 'bench'], { isCancelled: () => unmountedRef.current });
+    addGymDecor(scene, ['dumbbells', 'bench'], {
+      focus: { x: 0, z: -0.2 },
+      isCancelled: () => unmountedRef.current,
+    });
 
     const floor = new THREE.Mesh(
       new THREE.PlaneGeometry(24, 24),
@@ -171,22 +174,36 @@ export const MirrorPosingGame: React.FC<MirrorPosingGameProps> = ({
     floor.receiveShadow = true;
     scene.add(floor);
 
-    // Giant Gym Mirror Wall + LED Status Frame
-    const mirrorGlass = new THREE.Mesh(
-      new THREE.BoxGeometry(3.4, 2.35, 0.06),
-      new THREE.MeshStandardMaterial({ color: 0x1e293b, metalness: 0.92, roughness: 0.1 })
-    );
-    mirrorGlass.position.set(0, 1.25, 1.15);
-    scene.add(mirrorGlass);
-
+    // Mirror POV Frame & LED Status Light Perimeter (framing edges without blocking camera view)
+    const frameMat = new THREE.MeshStandardMaterial({ color: 0x0f172a, metalness: 0.85, roughness: 0.25 });
     const statusStripMat = new THREE.MeshStandardMaterial({
       color: 0x10b981,
       emissive: 0x10b981,
-      emissiveIntensity: 0.85,
+      emissiveIntensity: 0.9,
     });
-    const statusBar = new THREE.Mesh(new THREE.BoxGeometry(3.55, 0.1, 0.1), statusStripMat);
-    statusBar.position.set(0, 2.48, 1.15);
+    for (const sx of [-1.85, 1.85]) {
+      const sidePost = new THREE.Mesh(new THREE.BoxGeometry(0.1, 2.6, 0.12), frameMat);
+      sidePost.position.set(sx, 1.3, 0.85);
+      scene.add(sidePost);
+      const sideLed = new THREE.Mesh(new THREE.BoxGeometry(0.035, 2.45, 0.04), statusStripMat);
+      sideLed.position.set(sx - Math.sign(sx) * 0.055, 1.3, 0.82);
+      scene.add(sideLed);
+    }
+    const statusBar = new THREE.Mesh(new THREE.BoxGeometry(3.8, 0.09, 0.1), statusStripMat);
+    statusBar.position.set(0, 2.52, 0.85);
     scene.add(statusBar);
+
+    // Background Gym Monitor / Staff NPC who patrols behind athlete and turns during warning/watching
+    const monitorRig = buildAthleteModel({
+      gender: 'male',
+      fitnessScore: 72,
+      skinTone: '#DFB08C',
+      hairColor: '#18181B',
+      outfit: 'basic',
+    });
+    monitorRig.root.position.set(-1.1, 0, -1.65);
+    monitorRig.root.rotation.y = Math.PI / 2;
+    scene.add(monitorRig.root);
 
     const athleteRig = buildAthleteModel({
       gender: athlete?.gender ?? 'male',
@@ -195,7 +212,7 @@ export const MirrorPosingGame: React.FC<MirrorPosingGameProps> = ({
       hairColor: athlete?.hairColor ?? '#1C1C1C',
       outfit: athlete?.outfit ?? 'pro',
     });
-    athleteRig.root.position.set(0, 0, -0.15);
+    athleteRig.root.position.set(0, 0, 0.05);
     scene.add(athleteRig.root);
 
     let glbRig: GlbPoseRig | null = null;
@@ -207,7 +224,7 @@ export const MirrorPosingGame: React.FC<MirrorPosingGameProps> = ({
       aiModel,
       isCancelled: () => unmountedRef.current,
       onLoaded: (rig) => {
-        rig.root.position.set(0, 0, -0.15);
+        rig.root.position.set(0, 0, 0.05);
         rig.poseMirrorFlex(0, true, 0);
         scene.add(rig.root);
         glbRig = rig;
@@ -221,7 +238,7 @@ export const MirrorPosingGame: React.FC<MirrorPosingGameProps> = ({
       const ch = Math.max(1, container.clientHeight);
       const nextAsp = cw / ch;
       camera.aspect = nextAsp;
-      camera.position.z = computeResponsiveCameraZ(3.15, nextAsp, 1.0);
+      camera.position.z = computeResponsiveCameraZ(3.05, nextAsp, 1.0);
       camera.updateProjectionMatrix();
       renderer.setSize(cw, ch);
     });
@@ -229,6 +246,7 @@ export const MirrorPosingGame: React.FC<MirrorPosingGameProps> = ({
 
     let last = performance.now();
     let frameId = 0;
+    let patrolPhase = 0;
 
     const tick = (now: number) => {
       if (unmountedRef.current) return;
@@ -267,12 +285,34 @@ export const MirrorPosingGame: React.FC<MirrorPosingGameProps> = ({
       if (watchRef.current === 'safe') {
         statusStripMat.color.setHex(0x10b981);
         statusStripMat.emissive.setHex(0x10b981);
+        patrolPhase += dt * 1.15;
+        const nextX = Math.sin(patrolPhase) * 1.35;
+        const vx = Math.cos(patrolPhase);
+        monitorRig.root.position.x = nextX;
+        const targetYaw = vx >= 0 ? Math.PI * 0.55 : -Math.PI * 0.55;
+        monitorRig.root.rotation.y = THREE.MathUtils.damp(monitorRig.root.rotation.y, targetYaw, 6, dt);
+        const step = patrolPhase * 4.5;
+        monitorRig.leftLegPivot.rotation.x = Math.sin(step) * 0.35;
+        monitorRig.rightLegPivot.rotation.x = -Math.sin(step) * 0.35;
+        monitorRig.leftArmPivot.rotation.x = -Math.sin(step) * 0.25;
+        monitorRig.rightArmPivot.rotation.x = Math.sin(step) * 0.25;
+        monitorRig.headGroup.rotation.y = 0;
       } else if (watchRef.current === 'warning') {
         statusStripMat.color.setHex(0xfbbf24);
         statusStripMat.emissive.setHex(0xfbbf24);
+        // Monitor stops and begins turning head/torso toward the mirror
+        monitorRig.root.rotation.y = THREE.MathUtils.damp(monitorRig.root.rotation.y, 0.45, 7, dt);
+        monitorRig.leftLegPivot.rotation.x = THREE.MathUtils.damp(monitorRig.leftLegPivot.rotation.x, 0, 8, dt);
+        monitorRig.rightLegPivot.rotation.x = THREE.MathUtils.damp(monitorRig.rightLegPivot.rotation.x, 0, 8, dt);
+        monitorRig.headGroup.rotation.y = THREE.MathUtils.damp(monitorRig.headGroup.rotation.y, -0.35, 8, dt);
       } else {
         statusStripMat.color.setHex(0xf43f5e);
         statusStripMat.emissive.setHex(0xf43f5e);
+        // Monitor stares straight toward athlete/mirror!
+        monitorRig.root.rotation.y = THREE.MathUtils.damp(monitorRig.root.rotation.y, -Math.atan2(monitorRig.root.position.x, 1.7), 10, dt);
+        monitorRig.leftLegPivot.rotation.x = 0;
+        monitorRig.rightLegPivot.rotation.x = 0;
+        monitorRig.headGroup.rotation.y = 0;
       }
 
       if (posingRef.current) {
